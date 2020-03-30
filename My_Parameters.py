@@ -16,6 +16,7 @@ class My_Parameters:
         except IOError:
             print("Input parameter file '" + param_name + "' not found. Creating a default one")
             f = open(param_name, "w")
+            f.write("Reynolds_number = 1000\n")
             f.write("Raylegh_number = 100\n")
             f.write("Prandtl_number = 1\n")
             f.write("Time_step = 0.1\n")

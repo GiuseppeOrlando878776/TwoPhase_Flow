@@ -6,8 +6,7 @@ class RayleghTaylor:
     def __init__(self, param_name):
         """
         Param --- class Parameters to store desired configuration
-        Ra    --- Raylegh number
-        Pr    --- Prandtl number
+        Re    --- Reynolds number
         dt    --- Specified time step
         deg   --- Polynomial degree
         """
@@ -15,8 +14,7 @@ class RayleghTaylor:
         self.Param = My_Parameters(param_name).get_param()
 
         try:
-            self.Ra = self.Param["Raylegh_number"]
-            self.Pr = self.Param["Prandtl_number"]
+            self.Re = self.Param["Reynolds_number"]
             self.dt = self.Param["Time_step"]
             self.deg = self.Param["Polynomial_degree"]
         except RuntimeError as e:
