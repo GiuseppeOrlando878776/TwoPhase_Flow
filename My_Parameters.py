@@ -1,5 +1,6 @@
 from fenics import Parameters
 
+
 """This class reads parameter files specific for the problem.
 It is necessary because the 'Parameters' class provided by FENICS does not
 accept a file, so basically we encapsulate it in a new class"""
@@ -36,8 +37,9 @@ class My_Parameters:
                 if(idx_eq != -1):
                     self.Param.add(line[0 : idx_eq],float(line[idx_eq + 3 : -1]))
                 else:
-                    raise Exception("Invalid format to read parameters.\
-                                     Please check the configuration file")
+                    raise Exception("Invalid format to read parameters. \
+                                     Please check the configuration file: \
+                                     you need a space before and after the equal")
 
 
     """Return the standard FENICS Parameters class"""
