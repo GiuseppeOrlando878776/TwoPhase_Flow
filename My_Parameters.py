@@ -17,10 +17,13 @@ class My_Parameters:
             print("Input parameter file '" + param_name + "' not found. Creating a default one")
             f = open(param_name, "w")
             f.write("Reynolds_number = 1000\n")
+            f.write("Atwood number = 0.5\n")
             f.write("Raylegh_number = 100\n")
             f.write("Prandtl_number = 1\n")
             f.write("Time_step = 0.1\n")
+            f.write("End_time = 2.0\n")
             f.write("Polynomial_degree = 0\n")
+            f.wrtie("Number_vertices = 64\n")
             f.close()
             self.file = open(param_name, "r")
 
