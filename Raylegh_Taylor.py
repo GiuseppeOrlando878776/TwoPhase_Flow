@@ -88,16 +88,27 @@ class RayleghTaylor:
         # Define variational problem for step 1
         F1 = rho_old*dot((self.u - self.u_old) / self.DT, self.v)*dx \
            + rho_old*dot(dot(self.u_old, nabla_grad(self.u_old)), self.v)*dx \
-           + inner(sigma(mu_old, U, p_n), D(v))*dx \
-           + dot(p_n*n, v)*ds - dot(mu*nabla_grad(U)*n, v)*ds \
+           + inner(sigma(mu_old, U, self.p_old), D(v))*dx \
+           + dot(self.p_old*n, v)*ds - dot(mu_old*nabla_grad(U)*n, v)*ds \
            - dot(f, v)*dx
         a1 = lhs(F1)
         self.L1 = rhs(F1)
 
         # Define variational problem for step 2
-        a2 = dot(nabla_grad(p), nabla_grad(q))*dx
-        self.L2 = dot(nabla_grad(p_n), nabla_grad(q))*dx - (1/DT)*div(u_)*q*dx
+        a2 = dot(nabla_grad(self.p), nabla_grad(self.q))*dx
+        self.L2 = dot(nabla_grad(self.p_old), nabla_grad(self.q))*dx - (1/DT)*div(self.u_curr)*self.q*dx
 
         # Assemble matrices
         self.A1 = assemble(a1)
         self.A2 = assemble(a2)
+
+
+    """Build the system for Level set simulation"""
+    def assemble_Levelset_system(self):
+        F3 = (self.phi - self.phi_old) / self.DT * self.l*dx \
+           + self.phi*dot(self.u_curr*nabla_grad(self.l))*dx
+        a3 = lhs(F3)
+        self.L3 = rhs(F3)
+
+        # Assemble matrices
+        self.A3 = assemble(a3)
