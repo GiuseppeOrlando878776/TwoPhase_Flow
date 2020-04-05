@@ -65,7 +65,8 @@ class RayleghTaylor:
 
     """Set the proper initial condition"""
     def set_initial_condition(self):
-        self.phi_old.interpolate("atan(x)*x[0]>1.0")
+        self.phi_old.interpolate("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))")
+        self.u_old.assign(0.0,0.0)
 
 
     """Compute density"""
@@ -79,7 +80,8 @@ class RayleghTaylor:
 
     """Build the system for Navier-Stokes simulation"""
     def assemble_NS_system(self):
-        #Compute actual density and viscosity. It should work with class Function
+        #Compute actual density and viscosity. The own functions should work
+        #with class Function
         rho_old = self.rho(self.phi_old, 1e-4)
         mu_old  = self.mu(self.phi_old, 1e-4)
 
