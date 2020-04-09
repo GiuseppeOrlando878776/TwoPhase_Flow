@@ -39,27 +39,27 @@ class RayleghTaylor:
         #Define function spaces
         self.V = VectorFunctionSpace(mesh, 'P', 2)
         self.Q = FunctionSpace(mesh, 'P', 1)
+        self.W = MixedFunctionSpace([V, Q])
 
         #Define trial and test functions
-        self.u   = TrialFunction(V)
-        self.v   = TestFunction(V)
-        self.p   = TrialFunction(Q)
-        self.q   = TestFunction(Q)
-        self.phi = TrialFunction(Q)
-        self.l   = TestFunction(Q)
+        (self.u, self.p) = TrialFunctions(W)
+        self.phi         = TrialFunction(W)
+        (self.v, self.q) = TestFunctions(W)
+        self.l           = TestFunction(W)
 
         #Define functions for solutions at previous and current time steps
-        self.u_old    = Function(V)
-        self.u_curr   = Function(V)
-        self.p_old    = Function(Q)
-        self.p_curr   = Function(Q)
+        self.w_old = Function(W)
+        (self.u_old, self.p_old) = self.w_old.split()
         self.phi_old  = Function(Q)
+        self.w_curr = Function(W)
+        (self.u_curr, self.p_curr) = self.w_curr.split()
         self.phi_curr = Function(Q)
 
         #Convert time step to constant FENICS function
         self.DT = Constant(self.dt)
         self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
+
 
     """Build the mesh for the simulation"""
     def build_mesh(self):
@@ -68,21 +68,28 @@ class RayleghTaylor:
         n_points = self.Param["Number_vertices"]
         self.mesh = generate_mesh(domain, n_points)
 
+        #Prepare useful variables for Interior Penalty
+        self.n = FacetNormal(self.mesh)
+        self.h = CellSize(self.mesh)
+        self.h_avg = (h('+') + h('-'))/2.0
+        self.alpha = Constant(0.1)
+
 
     """Set the proper initial condition"""
     def set_initial_condition(self):
         self.phi_old.interpolate("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))")
-        self.u_old.assign((0.0,0.0))
+        self.w_old.assign((0.0,0.0,1.0))
+        #(self.u_old, self.p_old) = self.w_old.split()
 
 
     """Auxiliary function to compute density"""
-    def rho(self, q, eps):
-        return self.rho1*(1.0 - CHeaviside(q,eps)) + self.rho2*CHeaviside(q,eps)
+    def rho(self, x, eps):
+        return self.rho1*(1.0 - CHeaviside(x,eps)) + self.rho2*CHeaviside(x,eps)
 
 
     """Auxiliary function to compute viscosity"""
-    def mu(self, q, eps):
-        return self.mu1*(1.0 - CHeaviside(q,eps)) + self.mu2*CHeaviside(q,eps)
+    def mu(self, x, eps):
+        return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
 
 
     """Build the system for Navier-Stokes simulation"""
@@ -97,63 +104,62 @@ class RayleghTaylor:
            + inner(rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
            + 1.0/self.Re*inner(sigma(mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
            + 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx\
-           - 1.0/self.Re*inner(sigma(mu_old, self.u, self.p_old)*n,v)*ds \
+           - 1.0/self.Re*inner(sigma(mu_old, self.u, self.p)*n,v)*ds \
            - 1.0/self.Re*inner(self.surf_coeff*div(n)*n*CDelta(self.phi_old, 1e-4), self.v)*dx
         a1 = lhs(F1)
         L1 = rhs(F1)
 
-        # Define variational problem for step 2
-        a2 = 1.0/Re*inner(grad(self.p), grad(self.q))*dx
-        L2 = inner(grad(self.p_old), grad(self.q))*dx \
-           - (1/self.DT)*div(self.u_curr)*self.q*dx
-
         # Assemble matrices and right-hand sides
         self.A1 = assemble(a1)
-        self.A2 = assemble(a2)
-
         self.b1 = assemble(L1)
-        self.b2 = assemble(L2)
 
 
     """Interior penalty method"""
     def IP(phi,l):
-        n = FacetNormal(self.mesh)
-        h = CellSize(self.mesh)
-        h_avg = (h('+') + h('-'))/2.0
-        alpha = Constant(0.1)
-        r = alpha('+')*h_avg*h_avg*inner(jump(grad(phi),n), jump(grad(l),n))*dS
+        r = self.alpha*self.h_avg*self.h_avg*inner(jump(grad(phi),self.n), jump(grad(l),n))*dS
         return r
 
 
     """Build the system for Level set simulation"""
     def assemble_Levelset_system(self):
-        F3 = (self.phi - self.phi_old) / self.DT * self.l*dx \
+        F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
            - inner(self.phi*self.u_curr, grad(self.l))*dx \
            + IP(self.phi, self.l)
-        a3 = lhs(F3)
-        L3 = rhs(F3)
+        a2 = lhs(F2)
+        L2 = rhs(F2)
 
-        # Assemble matrices
-        self.A3 = assemble(a3)
-        self.b3 = assemble(L3)
+        # Assemble matrix nad right-hand side
+        self.A2 = assemble(a2)
+        self.b2 = assemble(L2)
 
 
     """Execute simulation"""
     def run(self):
+        #Build the mesh
+        self.build_mesh()
+
+        #Set the initial condition
+        self.set_initial_condition()
+
         #Time-stepping
         t = self.dt
-        while t < self.t_end:
-            print("t = ",self.dt)
+        while t <= self.t_end:
+            print("t = ",str(t))
 
-            solve(self.A1, self.u_curr.vector(), self.b1)
-            solve(self.A2, self.p_curr.vector(), self.b2)
-            self.u_curr = project(self.u_curr - self.DT*(self.p.curr - self.p.old), V)
-            solve(self.A3, self.phi_curr.vector(), b3)
+            #Solve Navier-Stokes
+            self.assemble_NS_system()
+            solve(self.A1, self.w_curr.vector(), self.b1)
 
-            plot(self.phi_curr, interactive=True)
+            #Solve level-set
+            self.assemble_Levelset_system()
 
-            self.u_old.assign(self.u_curr)
-            self.p_old.assign(self.p_curr)
+            solve(self.A2, self.phi_curr.vector(), self.b2)
+
+            #Plot level-set solution
+            plot(self.phi_curr, interactive = True)
+
+            #Prepare to next step
+            self.w_old.assign(self.w_curr)
             self.phi_old.assign(self.phi_curr)
 
-            t += self.dt
+            t = conditional(gt(t + self.dt, self.t_end), self.t_end, t + self.dt)
