@@ -19,17 +19,21 @@ class RayleghTaylor:
         try:
             self.Re   = self.Param["Reynolds_number"]
             self.At   = self.Param["Atwood_number"]
-            self.rho1 = self.Param["Heavier_density"]
-            self.mu1  = self.Param["Viscosity_heavier"]
-            self.mu2  = self.Param["Viscosity_lighter"]
+            self.rho1 = self.Param["Lighter_density"]
             self.dt   = self.Param["Time_step"]
             self.tend = self.Param["End_time"]
             self.deg  = self.Param["Polynomial_degree"]
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
-        #Compute lighter density
-        self.rho2 = self.rho1*(1.0 - self.At)/(1.0 + self.At)
+        #Compute heavier density
+        self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
+
+        #Compute viscosity: the 'lighter' viscosity will be computed by
+        #Reynolds number, while for the 'heavier' we choose to impose a constant
+        #density-viscosity ratio (arbitrary choice)
+        self.mu1 = self.rho1*np.sqrt(9.81*self.At)/self.Re
+        self.mu2 = self.rho2*self.mu1/self.rho1
 
         #Define function spaces
         self.V = VectorFunctionSpace(mesh, 'P', 2)
@@ -78,11 +82,6 @@ class RayleghTaylor:
     """Auxiliary function to compute viscosity"""
     def mu(self, q, eps):
         return self.mu1*(1.0 - CHeaviside(q,eps)) + self.mu2*CHeaviside(q,eps)
-
-
-    """Function to detect interface as boundary"""
-    def bc_interface(x, on_boundary):
-        return abs(self.phi_old(x)) < DOLFIN_EPS
 
 
     """Build the system for Navier-Stokes simulation"""

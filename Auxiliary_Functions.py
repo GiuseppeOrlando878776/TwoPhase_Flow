@@ -14,3 +14,9 @@ def sigma(mu, u, p):
 def CHeaviside(psi, eps):
     val = 0.5*(1.0 + psi/eps + 1/np.pi()*np.sin(np.pi()*psi/eps))
     return conditional(lt(abs(psi),eps),val,(np.sign(psi) + 1)/2)
+
+
+"""'Continuous Dirac's delta approximation'"""
+def CDelta(psi, eps):
+    val = 1.0/(2.0*eps)*(1.0 + np.cos(np.pi()*psi/eps))
+    return conditional(lt(abs(psi),eps),val,0.0)
