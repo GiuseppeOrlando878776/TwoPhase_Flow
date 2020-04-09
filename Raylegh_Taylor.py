@@ -9,6 +9,7 @@ class RayleghTaylor:
         """
         Param --- class Parameters to store desired configuration
         Re    --- Reynolds number
+        At    --- Atwood number
         dt    --- Specified time step
         tend  --- End time of the simulation
         deg   --- Polynomial degree
@@ -58,7 +59,7 @@ class RayleghTaylor:
         #Convert time step to constant FENICS function
         self.DT = Constant(self.dt)
         self.g  = Constant(9.81)
-        self.e2 = Constant(0,1)
+        self.e2 = Constant((0.0,1.0))
 
     """Build the mesh for the simulation"""
     def build_mesh(self):
@@ -71,7 +72,7 @@ class RayleghTaylor:
     """Set the proper initial condition"""
     def set_initial_condition(self):
         self.phi_old.interpolate("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))")
-        self.u_old.assign(0.0,0.0)
+        self.u_old.assign((0.0,0.0))
 
 
     """Auxiliary function to compute density"""
@@ -92,29 +93,67 @@ class RayleghTaylor:
         mu_old  = self.mu(self.phi_old, 1e-4)
 
         # Define variational problem for step 1
-        F1 = rho_old*dot((self.u - self.u_old) / self.DT, self.v)*dx \
-           + rho_old*dot(dot(self.u_old, nabla_grad(self.u_old)), self.v)*dx \
-           + 1.0/self.Re*inner(sigma(mu_old, U, self.p_old), D(v))*dx \
-           + 1.0/self.Re*dot(self.p_old*n, v)*ds - dot(mu_old*nabla_grad(U)*n, v)*ds \
-           - 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx
+        F1 = inner(rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
+           + inner(rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
+           + 1.0/self.Re*inner(sigma(mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
+           + 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx\
+           - 1.0/self.Re*inner(sigma(mu_old, self.u, self.p_old)*n,v)*ds \
+           - 1.0/self.Re*inner(self.surf_coeff*div(n)*n*CDelta(self.phi_old, 1e-4), self.v)*dx
         a1 = lhs(F1)
-        self.L1 = rhs(F1)
+        L1 = rhs(F1)
 
         # Define variational problem for step 2
-        a2 = 1.0/Re*dot(nabla_grad(self.p), nabla_grad(self.q))*dx
-        self.L2 = dot(nabla_grad(self.p_old), nabla_grad(self.q))*dx - (1/DT)*div(rho_old*self.u_curr)*self.q*dx
+        a2 = 1.0/Re*inner(grad(self.p), grad(self.q))*dx
+        L2 = inner(grad(self.p_old), grad(self.q))*dx \
+           - (1/self.DT)*div(self.u_curr)*self.q*dx
 
-        # Assemble matrices
+        # Assemble matrices and right-hand sides
         self.A1 = assemble(a1)
         self.A2 = assemble(a2)
+
+        self.b1 = assemble(L1)
+        self.b2 = assemble(L2)
+
+
+    """Interior penalty method"""
+    def IP(phi,l):
+        n = FacetNormal(self.mesh)
+        h = CellSize(self.mesh)
+        h_avg = (h('+') + h('-'))/2.0
+        alpha = Constant(0.1)
+        r = alpha('+')*h_avg*h_avg*inner(jump(grad(phi),n), jump(grad(l),n))*dS
+        return r
 
 
     """Build the system for Level set simulation"""
     def assemble_Levelset_system(self):
         F3 = (self.phi - self.phi_old) / self.DT * self.l*dx \
-           + self.phi*dot(self.u_curr*nabla_grad(self.l))*dx
+           - inner(self.phi*self.u_curr, grad(self.l))*dx \
+           + IP(self.phi, self.l)
         a3 = lhs(F3)
-        self.L3 = rhs(F3)
+        L3 = rhs(F3)
 
         # Assemble matrices
         self.A3 = assemble(a3)
+        self.b3 = assemble(L3)
+
+
+    """Execute simulation"""
+    def run(self):
+        #Time-stepping
+        t = self.dt
+        while t < self.t_end:
+            print("t = ",self.dt)
+
+            solve(self.A1, self.u_curr.vector(), self.b1)
+            solve(self.A2, self.p_curr.vector(), self.b2)
+            self.u_curr = project(self.u_curr - self.DT*(self.p.curr - self.p.old), V)
+            solve(self.A3, self.phi_curr.vector(), b3)
+
+            plot(self.phi_curr, interactive=True)
+
+            self.u_old.assign(self.u_curr)
+            self.p_old.assign(self.p_curr)
+            self.phi_old.assign(self.phi_curr)
+
+            t += self.dt
