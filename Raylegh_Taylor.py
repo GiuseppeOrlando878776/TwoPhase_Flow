@@ -53,7 +53,8 @@ class RayleghTaylor:
 
         #Convert time step to constant FENICS function
         self.DT = Constant(self.dt)
-
+        self.g  = Constant(9.81)
+        self.e2 = Constant(0,1)
 
     """Build the mesh for the simulation"""
     def build_mesh(self):
@@ -69,13 +70,19 @@ class RayleghTaylor:
         self.u_old.assign(0.0,0.0)
 
 
-    """Compute density"""
+    """Auxiliary function to compute density"""
     def rho(self, q, eps):
         return self.rho1*(1.0 - CHeaviside(q,eps)) + self.rho2*CHeaviside(q,eps)
 
-    """Compute viscosity"""
+
+    """Auxiliary function to compute viscosity"""
     def mu(self, q, eps):
         return self.mu1*(1.0 - CHeaviside(q,eps)) + self.mu2*CHeaviside(q,eps)
+
+
+    """Function to detect interface as boundary"""
+    def bc_interface(x, on_boundary):
+        return abs(self.phi_old(x)) < DOLFIN_EPS
 
 
     """Build the system for Navier-Stokes simulation"""
@@ -88,15 +95,15 @@ class RayleghTaylor:
         # Define variational problem for step 1
         F1 = rho_old*dot((self.u - self.u_old) / self.DT, self.v)*dx \
            + rho_old*dot(dot(self.u_old, nabla_grad(self.u_old)), self.v)*dx \
-           + inner(sigma(mu_old, U, self.p_old), D(v))*dx \
-           + dot(self.p_old*n, v)*ds - dot(mu_old*nabla_grad(U)*n, v)*ds \
-           - dot(f, v)*dx
+           + 1.0/self.Re*inner(sigma(mu_old, U, self.p_old), D(v))*dx \
+           + 1.0/self.Re*dot(self.p_old*n, v)*ds - dot(mu_old*nabla_grad(U)*n, v)*ds \
+           - 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx
         a1 = lhs(F1)
         self.L1 = rhs(F1)
 
         # Define variational problem for step 2
-        a2 = dot(nabla_grad(self.p), nabla_grad(self.q))*dx
-        self.L2 = dot(nabla_grad(self.p_old), nabla_grad(self.q))*dx - (1/DT)*div(self.u_curr)*self.q*dx
+        a2 = 1.0/Re*dot(nabla_grad(self.p), nabla_grad(self.q))*dx
+        self.L2 = dot(nabla_grad(self.p_old), nabla_grad(self.q))*dx - (1/DT)*div(rho_old*self.u_curr)*self.q*dx
 
         # Assemble matrices
         self.A1 = assemble(a1)
