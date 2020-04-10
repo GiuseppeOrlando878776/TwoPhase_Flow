@@ -1,5 +1,6 @@
 from My_Parameters import My_Parameters
 from Auxiliary_Functions import *
+from Periodic_BC import *
 
 from fenics import *
 
@@ -18,12 +19,13 @@ class RayleghTaylor:
         self.Param = My_Parameters(param_name).get_param()
 
         try:
-            self.Re   = self.Param["Reynolds_number"]
-            self.At   = self.Param["Atwood_number"]
-            self.rho1 = self.Param["Lighter_density"]
-            self.dt   = self.Param["Time_step"]
-            self.tend = self.Param["End_time"]
-            self.deg  = self.Param["Polynomial_degree"]
+            self.Re         = self.Param["Reynolds_number"]
+            self.At         = self.Param["Atwood_number"]
+            self.surf_coeff = self.Param["Surface_tension"]
+            self.rho1       = self.Param["Lighter_density"]
+            self.dt         = self.Param["Time_step"]
+            self.tend       = self.Param["End_time"]
+            self.deg        = self.Param["Polynomial_degree"]
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
@@ -37,8 +39,8 @@ class RayleghTaylor:
         self.mu2 = self.rho2*self.mu1/self.rho1
 
         #Define function spaces
-        self.V = VectorFunctionSpace(mesh, 'P', 2)
-        self.Q = FunctionSpace(mesh, 'P', 1)
+        self.V = VectorFunctionSpace(mesh, 'P', 2, constrained_domain=PeriodicBoundary())
+        self.Q = FunctionSpace(mesh, 'P', 1, constrained_domain=PeriodicBoundary()s)
         self.W = MixedFunctionSpace([V, Q])
 
         #Define trial and test functions
@@ -63,7 +65,7 @@ class RayleghTaylor:
 
     """Build the mesh for the simulation"""
     def build_mesh(self):
-        channel = Rectangle(Point(0, 0), Point(2.2, 0.41))
+        channel = Rectangle(Point(0, 0), Point(0.41, 2.22))
         #Generate mesh
         n_points = self.Param["Number_vertices"]
         self.mesh = generate_mesh(domain, n_points)
@@ -92,6 +94,16 @@ class RayleghTaylor:
         return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
 
 
+    """No-slip boundary detection"""
+    def WallBoundary(x, on_boundary):
+        return x[1] < DOLFIN_EPS or x[1] - 2.22 > DOLFIN_EPS
+
+
+    """Assemble boundary condition"""
+    def assembleBC(self):
+        self.bcs = DirichletBC(W.sub(0), Constant((0.0,0.0)), WallBoundary)
+
+
     """Build the system for Navier-Stokes simulation"""
     def assemble_NS_system(self):
         #Compute actual density and viscosity. The own functions should work
@@ -104,7 +116,7 @@ class RayleghTaylor:
            + inner(rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
            + 1.0/self.Re*inner(sigma(mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
            + 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx\
-           - 1.0/self.Re*inner(sigma(mu_old, self.u, self.p)*n,v)*ds \
+           #- 1.0/self.Re*inner(sigma(mu_old, self.u, self.p)*n,v)*ds \
            - 1.0/self.Re*inner(self.surf_coeff*div(n)*n*CDelta(self.phi_old, 1e-4), self.v)*dx
         a1 = lhs(F1)
         L1 = rhs(F1)
@@ -112,6 +124,10 @@ class RayleghTaylor:
         # Assemble matrices and right-hand sides
         self.A1 = assemble(a1)
         self.b1 = assemble(L1)
+
+        # Apply boundary conditions
+        self.bcs.apply(self.A1)
+        self.bcs.apply(self.A2)
 
 
     """Interior penalty method"""
@@ -140,6 +156,9 @@ class RayleghTaylor:
 
         #Set the initial condition
         self.set_initial_condition()
+
+        #Assemble boundary conditions
+        self.assembleBC()
 
         #Time-stepping
         t = self.dt
