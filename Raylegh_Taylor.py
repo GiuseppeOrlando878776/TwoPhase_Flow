@@ -46,39 +46,40 @@ class RayleghTaylor:
 
     """Build the mesh for the simulation"""
     def build_mesh(self):
-        channel = Rectangle(Point(0, 0), Point(0.41, 2.22))
+        #channel = Rectangle(Point(0, 0), Point(0.41, 2.22))
         #Generate mesh
-        n_points = self.Param["Number_vertices"]
-        self.mesh = generate_mesh(domain, n_points)
+        #n_points = self.Param["Number_vertices"]
+        self.mesh = RectangleMesh(Point(0.0, 0.0), Point(0.41, 2.22), 64, 64)
 
         #Prepare useful variables for Interior Penalty
         self.n = FacetNormal(self.mesh)
-        self.h = CellSize(self.mesh)
-        self.h_avg = (h('+') + h('-'))/2.0
+        self.h = CellDiameter(self.mesh)
+        self.h_avg = (self.h('+') + self.h('-'))/2.0
         self.alpha = Constant(0.1)
 
         #Define function spaces
-        Velem = VectorElement("Lagrange", mesh.ufl_cell(), 2)
-        Qelem = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
+        Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), 2)
+        Qelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), 1)
         self.W = FunctionSpace(self.mesh, Velem*Qelem, constrained_domain = PeriodicBoundary())
         self.Q = FunctionSpace(self.mesh, Qelem,       constrained_domain = PeriodicBoundary())
 
         #Define trial and test functions
-        (self.u, self.p) = TrialFunctions(W)
-        self.phi         = TrialFunction(W)
-        (self.v, self.q) = TestFunctions(W)
-        self.l           = TestFunction(W)
+        (self.u, self.p) = TrialFunctions(self.W)
+        self.phi         = TrialFunction(self.W)
+        (self.v, self.q) = TestFunctions(self.W)
+        self.l           = TestFunction(self.W)
 
         #Define functions for solutions at previous and current time steps
-        self.w_old    = Function(W)
-        self.phi_old  = Function(Q)
-        self.w_curr   = Function(W)
-        self.phi_curr = Function(Q)
+        self.w_old    = Function(self.W)
+        self.phi_old  = Function(self.Q)
+        self.w_curr   = Function(self.W)
+        self.phi_curr = Function(self.Q)
 
 
     """Set the proper initial condition"""
     def set_initial_condition(self):
-        self.phi_old.interpolate("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))")
+        f = Expression("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))",degree=2)
+        self.phi_old.assign(interpolate(f,self.Q))
         self.w_old.assign(interpolate(Constant((0.0,0.0,1.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
 
@@ -93,14 +94,9 @@ class RayleghTaylor:
         return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
 
 
-    """No-slip boundary detection"""
-    def WallBoundary(x, on_boundary):
-        return x[1] < DOLFIN_EPS or x[1] - 2.22 > DOLFIN_EPS
-
-
     """Assemble boundary condition"""
     def assembleBC(self):
-        self.bcs = DirichletBC(W.sub(0), Constant((0.0,0.0)), WallBoundary)
+        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
 
 
     """Build the system for Navier-Stokes simulation"""
@@ -114,8 +110,7 @@ class RayleghTaylor:
         F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
            + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
            + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
-           + 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx\
-           #- 1.0/self.Re*inner(sigma(mu_old, self.u, self.p)*n,v)*ds \
+           + 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx \
            - 1.0/self.Re*inner(self.surf_coeff*div(n)*n*CDelta(self.phi_old, 1e-4), self.v)*dx
         a1 = lhs(F1)
         L1 = rhs(F1)
@@ -161,7 +156,7 @@ class RayleghTaylor:
 
         #Time-stepping
         t = self.dt
-        while t <= self.t_end:
+        while t <= self.tend:
             print("t = ",str(t))
 
             #Solve Navier-Stokes

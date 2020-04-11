@@ -25,7 +25,7 @@ class My_Parameters:
             f.write("Time_step = 0.1\n")
             f.write("End_time = 2.0\n")
             f.write("Polynomial_degree = 0\n")
-            f.wrtie("Number_vertices = 64\n")
+            f.write("Number_vertices = 64\n")
             f.close()
             self.file = open(param_name, "r")
 
