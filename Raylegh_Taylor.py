@@ -38,26 +38,7 @@ class RayleghTaylor:
         self.mu1 = self.rho1*np.sqrt(9.81*self.At)/self.Re
         self.mu2 = self.rho2*self.mu1/self.rho1
 
-        #Define function spaces
-        self.V = VectorFunctionSpace(mesh, 'P', 2, constrained_domain=PeriodicBoundary())
-        self.Q = FunctionSpace(mesh, 'P', 1, constrained_domain=PeriodicBoundary()s)
-        self.W = MixedFunctionSpace([V, Q])
-
-        #Define trial and test functions
-        (self.u, self.p) = TrialFunctions(W)
-        self.phi         = TrialFunction(W)
-        (self.v, self.q) = TestFunctions(W)
-        self.l           = TestFunction(W)
-
-        #Define functions for solutions at previous and current time steps
-        self.w_old = Function(W)
-        (self.u_old, self.p_old) = self.w_old.split()
-        self.phi_old  = Function(Q)
-        self.w_curr = Function(W)
-        (self.u_curr, self.p_curr) = self.w_curr.split()
-        self.phi_curr = Function(Q)
-
-        #Convert time step to constant FENICS function
+        #Convert useful constants to constant FENICS function
         self.DT = Constant(self.dt)
         self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
@@ -76,12 +57,30 @@ class RayleghTaylor:
         self.h_avg = (h('+') + h('-'))/2.0
         self.alpha = Constant(0.1)
 
+        #Define function spaces
+        Velem = VectorElement("Lagrange", mesh.ufl_cell(), 2)
+        Qelem = FiniteElement("Lagrange", mesh.ufl_cell(), 1)
+        self.W = FunctionSpace(self.mesh, Velem*Qelem, constrained_domain = PeriodicBoundary())
+        self.Q = FunctionSpace(self.mesh, Qelem,       constrained_domain = PeriodicBoundary())
+
+        #Define trial and test functions
+        (self.u, self.p) = TrialFunctions(W)
+        self.phi         = TrialFunction(W)
+        (self.v, self.q) = TestFunctions(W)
+        self.l           = TestFunction(W)
+
+        #Define functions for solutions at previous and current time steps
+        self.w_old    = Function(W)
+        self.phi_old  = Function(Q)
+        self.w_curr   = Function(W)
+        self.phi_curr = Function(Q)
+
 
     """Set the proper initial condition"""
     def set_initial_condition(self):
         self.phi_old.interpolate("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))")
-        self.w_old.assign((0.0,0.0,1.0))
-        #(self.u_old, self.p_old) = self.w_old.split()
+        self.w_old.assign(interpolate(Constant((0.0,0.0,1.0)),self.W))
+        (self.u_old, self.p_old) = self.w_old.split()
 
 
     """Auxiliary function to compute density"""
@@ -108,13 +107,13 @@ class RayleghTaylor:
     def assemble_NS_system(self):
         #Compute actual density and viscosity. The own functions should work
         #with class Function
-        rho_old = self.rho(self.phi_old, 1e-4)
-        mu_old  = self.mu(self.phi_old, 1e-4)
+        self.rho_old = self.rho(self.phi_old, 1e-4)
+        self.mu_old  = self.mu(self.phi_old, 1e-4)
 
         # Define variational problem for step 1
-        F1 = inner(rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
-           + inner(rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
-           + 1.0/self.Re*inner(sigma(mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
+        F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
+           + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
+           + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
            + 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx\
            #- 1.0/self.Re*inner(sigma(mu_old, self.u, self.p)*n,v)*ds \
            - 1.0/self.Re*inner(self.surf_coeff*div(n)*n*CDelta(self.phi_old, 1e-4), self.v)*dx
@@ -127,7 +126,7 @@ class RayleghTaylor:
 
         # Apply boundary conditions
         self.bcs.apply(self.A1)
-        self.bcs.apply(self.A2)
+        self.bcs.apply(self.b1)
 
 
     """Interior penalty method"""
@@ -168,10 +167,10 @@ class RayleghTaylor:
             #Solve Navier-Stokes
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
+            (self.u_curr, self.p_curr) = self.w_curr.split()
 
             #Solve level-set
             self.assemble_Levelset_system()
-
             solve(self.A2, self.phi_curr.vector(), self.b2)
 
             #Plot level-set solution
@@ -179,6 +178,7 @@ class RayleghTaylor:
 
             #Prepare to next step
             self.w_old.assign(self.w_curr)
+            (self.u_old, self.p_old) = self.w_old.split()
             self.phi_old.assign(self.phi_curr)
 
             t = conditional(gt(t + self.dt, self.t_end), self.t_end, t + self.dt)
