@@ -1,5 +1,6 @@
 from My_Parameters import My_Parameters
 from Auxiliary_Functions import *
+from Periodic_BC import WallBoundary
 
 from fenics import *
 
@@ -93,14 +94,9 @@ class RayleghTaylor:
         return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
 
 
-    """Auxiliary function to detect boundaries"""
-    def Wall_Boundary(self, x, on_boundary):
-        return on_boundary
-
-
     """Assemble boundary condition"""
     def assembleBC(self):
-        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), Wall_Boundary)
+        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
 
 
     """Build the system for Navier-Stokes simulation"""
