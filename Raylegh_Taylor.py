@@ -12,7 +12,7 @@ class RayleghTaylor:
         Re    --- Reynolds number
         At    --- Atwood number
         dt    --- Specified time step
-        tend  --- End time of the simulation
+        t_end  --- End time of the simulation
         deg   --- Polynomial degree
         """
 
@@ -46,10 +46,9 @@ class RayleghTaylor:
 
     """Build the mesh for the simulation"""
     def build_mesh(self):
-        #channel = Rectangle(Point(0, 0), Point(0.41, 2.22))
         #Generate mesh
-        #n_points = self.Param["Number_vertices"]
-        self.mesh = RectangleMesh(Point(0.0, 0.0), Point(0.41, 2.22), 64, 64)
+        n_points = self.Param["Number_vertices"]
+        self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.Param["Base"], self.Param["Height"]), n_points, n_points)
 
         #Prepare useful variables for Interior Penalty
         self.n = FacetNormal(self.mesh)
@@ -58,8 +57,8 @@ class RayleghTaylor:
         self.alpha = Constant(0.1)
 
         #Define function spaces
-        Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), 2)
-        Qelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), 1)
+        Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
+        Qelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
         self.W = FunctionSpace(self.mesh, Velem*Qelem)
         self.Q = FunctionSpace(self.mesh, Qelem)
 
@@ -78,7 +77,7 @@ class RayleghTaylor:
 
     """Set the proper initial condition"""
     def set_initial_condition(self):
-        f = Expression("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))",degree=2)
+        f = Expression("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))", degree = 2)
         self.phi_old.assign(interpolate(f,self.Q))
         self.w_old.assign(interpolate(Constant((0.0,0.0,1.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()

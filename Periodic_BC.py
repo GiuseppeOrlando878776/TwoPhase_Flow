@@ -8,8 +8,8 @@ class PeriodicBoundary(SubDomain):
         return abs(x[0]) < DOLFIN_EPS and on_boundary
 
     #Map right boundary to left boundary
-    def map(self, x, y):
-        y[0] = x[0] - 0.41
+    def map(self, x, y, base):
+        y[0] = x[0] - base
         y[1] = x[1]
 
 """No-slip boundary detection"""
