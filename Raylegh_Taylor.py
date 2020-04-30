@@ -24,7 +24,7 @@ class RayleghTaylor:
             self.surf_coeff = self.Param["Surface_tension"]
             self.rho1       = self.Param["Lighter_density"]
             self.dt         = self.Param["Time_step"]
-            self.tend       = self.Param["End_time"]
+            self.t_end      = self.Param["End_time"]
             self.deg        = self.Param["Polynomial_degree"]
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
@@ -65,9 +65,9 @@ class RayleghTaylor:
 
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
-        self.phi         = TrialFunction(self.W)
+        self.phi         = TrialFunction(self.Q)
         (self.v, self.q) = TestFunctions(self.W)
-        self.l           = TestFunction(self.W)
+        self.l           = TestFunction(self.Q)
 
         #Define functions for solutions at previous and current time steps
         self.w_old    = Function(self.W)
@@ -85,7 +85,6 @@ class RayleghTaylor:
 
         self.rho_old = Function(self.Q)
         self.mu_old  = Function(self.Q)
-
 
 
     """Auxiliary function to compute density"""
@@ -113,8 +112,8 @@ class RayleghTaylor:
         F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
            + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
            + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
-           + 1.0/self.At*dot(rho_old*self.g*self.e2, v)*dx \
-           - 1.0/self.Re*inner(self.surf_coeff*div(n)*n*CDelta(self.phi_old, 1e-4), self.v)*dx
+           + 1.0/self.At*dot(self.rho_old*self.g*self.e2, self.v)*dx
+           #- 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx
         a1 = lhs(F1)
         L1 = rhs(F1)
 
@@ -128,8 +127,8 @@ class RayleghTaylor:
 
 
     """Interior penalty method"""
-    def IP(phi,l):
-        r = self.alpha*self.h_avg*self.h_avg*inner(jump(grad(phi),self.n), jump(grad(l),n))*dS
+    def IP(self, phi, l):
+        r = self.alpha*self.h_avg*self.h_avg*inner(jump(grad(phi),self.n), jump(grad(l),self.n))*dS
         return r
 
 
@@ -137,7 +136,7 @@ class RayleghTaylor:
     def assemble_Levelset_system(self):
         F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
            - inner(self.phi*self.u_curr, grad(self.l))*dx \
-           + IP(self.phi, self.l)
+           + self.IP(self.phi, self.l)
         a2 = lhs(F2)
         L2 = rhs(F2)
 
@@ -159,7 +158,7 @@ class RayleghTaylor:
 
         #Time-stepping
         t = self.dt
-        while t <= self.tend:
+        while t <= self.t_end:
             print("t = ",str(t))
 
             #Solve Navier-Stokes
@@ -179,4 +178,4 @@ class RayleghTaylor:
             (self.u_old, self.p_old) = self.w_old.split()
             self.phi_old.assign(self.phi_curr)
 
-            t = conditional(gt(t + self.dt, self.t_end), self.t_end, t + self.dt)
+            t = self.t_end if t + self.dt >= self.t_end else t + self.dt
