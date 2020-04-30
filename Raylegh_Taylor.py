@@ -83,6 +83,10 @@ class RayleghTaylor:
         self.w_old.assign(interpolate(Constant((0.0,0.0,1.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
 
+        self.rho_old = Function(self.Q)
+        self.mu_old  = Function(self.Q)
+
+
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
@@ -101,10 +105,9 @@ class RayleghTaylor:
 
     """Build the system for Navier-Stokes simulation"""
     def assemble_NS_system(self):
-        #Compute actual density and viscosity. The own functions should work
-        #with class Function
-        self.rho_old = self.rho(self.phi_old, 1e-4)
-        self.mu_old  = self.mu(self.phi_old, 1e-4)
+        #Compute actual density and viscosity.
+        self.rho_old.vector().set_local(self.rho(self.phi_old.vector().get_local(), 1e-4))
+        self.mu_old.vector().set_local(self.mu(self.phi_old.vector().get_local(), 1e-4))
 
         # Define variational problem for step 1
         F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
