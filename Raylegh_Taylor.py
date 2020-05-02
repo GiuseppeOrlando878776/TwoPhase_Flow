@@ -156,7 +156,7 @@ class RayleghTaylor:
         a2 = lhs(F2)
         L2 = rhs(F2)
 
-        # Assemble matrix nad right-hand side
+        # Assemble matrix and right-hand side
         self.A2 = assemble(a2)
         self.b2 = assemble(L2)
 
@@ -194,4 +194,4 @@ class RayleghTaylor:
             (self.u_old, self.p_old) = self.w_old.split()
             self.phi_old.assign(self.phi_curr)
 
-            t = self.t_end if t + self.dt >= self.t_end else t + self.dt
+            t = t + self.dt if t + self.dt <= self.t_end else self.t_end
