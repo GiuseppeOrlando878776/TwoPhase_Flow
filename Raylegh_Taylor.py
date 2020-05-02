@@ -47,8 +47,11 @@ class RayleghTaylor:
     """Build the mesh for the simulation"""
     def build_mesh(self):
         #Generate mesh
-        n_points = self.Param["Number_vertices"]
-        self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.Param["Base"], self.Param["Height"]), n_points, n_points)
+        try:
+            n_points = self.Param["Number_vertices"]
+            self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.Param["Base"], self.Param["Height"]), n_points, n_points)
+        except RuntimeError as e:
+            print(str(e) +  "\nPlease check configuration file")
 
         #Prepare useful variables for Interior Penalty
         self.n = FacetNormal(self.mesh)
@@ -77,13 +80,32 @@ class RayleghTaylor:
 
     """Set the proper initial condition"""
     def set_initial_condition(self):
-        f = Expression("tanh(x[1] - 2 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2))", degree = 2)
+        #Read from configuration file center and radius
+        try:
+            center = Point(self.param["x_center"], self.param["y_center"])
+            radius = self.param["Radius"]
+        except RuntimeError as e:
+            print(str(e) +  "\nPlease check configuration file")
+
+        #Set initial condition of bubble and check geoemtric limits
+        f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))-r",
+                        A = center[0], B = center[1], r = radius)
+        assert (center[0] - radius > 0.0 and center[0] + radius < self.Param["Base"] and
+                center[1] - radius > 0.0 and center[1] + radius < self.Param["Height"]),
+                "Initial condition of interface goes outside the domain"
+
+        #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        self.w_old.assign(interpolate(Constant((0.0,0.0,1.0)),self.W))
+        self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
 
         self.rho_old = Function(self.Q)
         self.mu_old  = Function(self.Q)
+
+
+    """Assemble boundary condition"""
+    def assembleBC(self):
+        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
 
 
     """Auxiliary function to compute density"""
@@ -94,11 +116,6 @@ class RayleghTaylor:
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
         return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
-
-
-    """Assemble boundary condition"""
-    def assembleBC(self):
-        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
 
 
     """Build the system for Navier-Stokes simulation"""
