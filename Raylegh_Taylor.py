@@ -3,7 +3,7 @@ from Auxiliary_Functions import *
 from Periodic_BC import WallBoundary
 
 from fenics import *
-import ufl, sys
+import ufl, sys, math
 
 class RayleghTaylor:
     """Class constructor"""
@@ -76,6 +76,7 @@ class RayleghTaylor:
         self.w_old    = Function(self.W)
         self.phi_old  = Function(self.Q)
         self.w_curr   = Function(self.W)
+        (self.u_curr, self.p_curr) = self.w_curr.split()
         self.phi_curr = Function(self.Q)
 
         #Define function for reinitialization
@@ -105,6 +106,51 @@ class RayleghTaylor:
 
         self.rho_old = Function(self.Q)
         self.mu_old  = Function(self.Q)
+        self.signp   = Function(self.Q)
+
+
+    """Interior penalty method"""
+    def IP(self, phi, l):
+        r = self.alpha*self.h_avg*self.h_avg*inner(jump(grad(phi),self.n), jump(grad(l),self.n))*dS
+        return r
+
+
+    """Set weak formulations"""
+    def set_weak_forms(self):
+        #Define variational problem for step 1 (Navier-Stokes)
+        F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
+           + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
+           + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
+           + 1.0/self.At*dot(self.rho_old*self.g*self.e2, self.v)*dx
+           #- 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx
+
+        #Save corresponding weak form and declare suitable matrix and vector
+        self.a1 = lhs(F1)
+        self.L1 = rhs(F1)
+
+        self.A1 = Matrix()
+        self.b1 = Vector()
+
+        #Define variational problem for step 2 (Level-set)
+        F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
+           - inner(self.phi*self.u_curr, grad(self.l))*dx \
+           + self.IP(self.phi, self.l)
+
+        #Save corresponding weak form and declare suitable matrix and vector
+        self.a2 = lhs(F2)
+        self.L2 = rhs(F2)
+
+        self.A2 = Matrix()
+        self.b2 = Vector()
+
+        #Set weak form for level-set reinitialization
+        dt = Constant(0.0001)
+        eps = Constant(1.0e-4)
+        alpha = Constant(0.0625)
+
+        self.a3 = self.phi/dt*self.l*dx
+        self.L3 = self.phi0/dt*self.l*dx + self.signp*(1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
+                  alpha*inner(grad(self.phi0), grad(self.l))* dx
 
 
     """Assemble boundary condition"""
@@ -128,61 +174,34 @@ class RayleghTaylor:
         self.rho_old.vector().set_local(self.rho(self.phi_old.vector().get_local(), 1e-4))
         self.mu_old.vector().set_local(self.mu(self.phi_old.vector().get_local(), 1e-4))
 
-        # Define variational problem for step 1
-        F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
-           + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
-           + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
-           + 1.0/self.At*dot(self.rho_old*self.g*self.e2, self.v)*dx
-           #- 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx
-        a1 = lhs(F1)
-        L1 = rhs(F1)
-
         # Assemble matrices and right-hand sides
-        self.A1 = assemble(a1)
-        self.b1 = assemble(L1)
+        assemble(self.a1, tensor = self.A1)
+        assemble(self.L1, tensor = self.b1)
 
         # Apply boundary conditions
         self.bcs.apply(self.A1)
         self.bcs.apply(self.b1)
 
 
-    """Interior penalty method"""
-    def IP(self, phi, l):
-        r = self.alpha*self.h_avg*self.h_avg*inner(jump(grad(phi),self.n), jump(grad(l),self.n))*dS
-        return r
-
-
     """Build the system for Level set simulation"""
     def assemble_Levelset_system(self):
-        F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
-           - inner(self.phi*self.u_curr, grad(self.l))*dx \
-           + self.IP(self.phi, self.l)
-        a2 = lhs(F2)
-        L2 = rhs(F2)
-
         # Assemble matrix and right-hand side
-        self.A2 = assemble(a2)
-        self.b2 = assemble(L2)
+        assemble(self.a2, tensor = self.A2)
+        assemble(self.L2, tensor = self.b2)
 
 
     """Build the system for Level set reinitialization"""
     def Levelset_reinit(self):
-        dt = Constant(0.0001)
-        eps = Constant(1.0e-4)
-        alpha = Constant(0.0625)
-        signp = ufl.sign(self.phi)
-
-        a3 = self.phi/dt*self.l*dx
-        L3 = self.phi0/dt*self.l*dx + signp*(1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
-             alpha*inner(grad(self.phi0), grad(self.l))* dx
+        self.signp = ufl.sign(self.phi)
 
         E_old = 1e10
+
         for n in range(10):
             #Set previous step solution
             self.phi0.assign(self.phi)
 
             #Solve the system
-            solve(a3 == L3, self.phi, [])
+            solve(self.a3 == self.L3, self.phi, [])
 
             #Compute the error and check no divergence
             error = (((self.phi - self.phi0)/dt)**2)*dx
@@ -202,10 +221,13 @@ class RayleghTaylor:
         #Set the initial condition
         self.set_initial_condition()
 
+        #Set weak formulations
+        self.set_weak_forms()
+
         #Assemble boundary conditions
         self.assembleBC()
 
-        #Time-stepping
+        #Time-stepping loop
         t = self.dt
         while t <= self.t_end:
             print("t = ",str(t))
