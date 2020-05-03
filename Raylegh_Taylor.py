@@ -44,6 +44,8 @@ class RayleghTaylor:
         self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
 
+        set_log_level(21)
+
 
     """Build the mesh for the simulation"""
     def build_mesh(self):
@@ -144,12 +146,12 @@ class RayleghTaylor:
         self.b2 = Vector()
 
         #Set weak form for level-set reinitialization
-        dt = Constant(0.0001)
+        self.deltat = Constant(0.0001)
         eps = Constant(1.0e-4)
         alpha = Constant(0.0625)
 
-        self.a3 = self.phi/dt*self.l*dx
-        self.L3 = self.phi0/dt*self.l*dx + ufl.sign(self.phi0)*\
+        self.a3 = self.phi/self.deltat*self.l*dx
+        self.L3 = self.phi0/self.deltat*self.l*dx + ufl.sign(self.phi0)*\
                   (1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                   alpha*inner(grad(self.phi0), grad(self.l))* dx
 
@@ -203,7 +205,7 @@ class RayleghTaylor:
             solve(self.a3 == self.L3, self.phi_curr, [])
 
             #Compute the error and check no divergence
-            error = (((self.phi_curr - self.phi0)/dt)**2)*dx
+            error = (((self.phi_curr - self.phi0)/self.deltat)**2)*dx
             E = sqrt(abs(assemble(error)))
 
             if(E_old < E):
@@ -235,7 +237,7 @@ class RayleghTaylor:
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
-
+            
             #Solve level-set
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)

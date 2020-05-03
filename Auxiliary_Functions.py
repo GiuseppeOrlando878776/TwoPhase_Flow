@@ -14,7 +14,7 @@ def sigma(mu, u, p):
 """'Continuous Heaviside approximation'"""
 def CHeaviside(psi, eps):
     val = 0.5*(1.0 + psi/eps + 1/np.pi*sin(np.pi*psi/eps))
-    return conditional(lt(abs(val),eps), val, (sign(psi) + 1)/2.0)
+    return conditional(lt(abs(val),eps), val, (ufl.sign(psi) + 1)/2.0)
 
 
 """'Continuous Dirac's delta approximation'"""
