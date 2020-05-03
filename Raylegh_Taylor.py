@@ -3,7 +3,7 @@ from Auxiliary_Functions import *
 from Periodic_BC import WallBoundary
 
 from fenics import *
-import ufl, sys, math
+import ufl, sys
 
 class RayleghTaylor:
     """Class constructor"""
@@ -50,7 +50,8 @@ class RayleghTaylor:
         #Generate mesh
         try:
             n_points = int(self.Param["Number_vertices"])
-            self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.Param["Base"], self.Param["Height"]), n_points, n_points)
+            self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.Param["Base"], self.Param["Height"]), \
+                                      n_points, n_points)
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
@@ -106,7 +107,6 @@ class RayleghTaylor:
 
         self.rho_old = Function(self.Q)
         self.mu_old  = Function(self.Q)
-        self.signp   = Function(self.Q)
 
 
     """Interior penalty method"""
@@ -149,7 +149,8 @@ class RayleghTaylor:
         alpha = Constant(0.0625)
 
         self.a3 = self.phi/dt*self.l*dx
-        self.L3 = self.phi0/dt*self.l*dx + self.signp*(1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
+        self.L3 = self.phi0/dt*self.l*dx + ufl.sign(self.phi)*\
+                  (1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                   alpha*inner(grad(self.phi0), grad(self.l))* dx
 
 
@@ -171,8 +172,8 @@ class RayleghTaylor:
     """Build the system for Navier-Stokes simulation"""
     def assemble_NS_system(self):
         #Compute actual density and viscosity.
-        self.rho_old.vector().set_local(self.rho(self.phi_old.vector().get_local(), 1e-4))
-        self.mu_old.vector().set_local(self.mu(self.phi_old.vector().get_local(), 1e-4))
+        self.rho_old = self.rho(self.phi_old, 1e-4)
+        self.mu_old  = self.mu(self.phi_old, 1e-4)
 
         # Assemble matrices and right-hand sides
         assemble(self.a1, tensor = self.A1)
@@ -192,8 +193,6 @@ class RayleghTaylor:
 
     """Build the system for Level set reinitialization"""
     def Levelset_reinit(self):
-        self.signp = ufl.sign(self.phi)
-
         E_old = 1e10
 
         for n in range(10):
