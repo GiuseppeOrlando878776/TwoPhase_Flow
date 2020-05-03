@@ -3,6 +3,7 @@ from Auxiliary_Functions import *
 from Periodic_BC import WallBoundary
 
 from fenics import *
+import ufl, sys
 
 class RayleghTaylor:
     """Class constructor"""
@@ -25,7 +26,7 @@ class RayleghTaylor:
             self.rho1       = self.Param["Lighter_density"]
             self.dt         = self.Param["Time_step"]
             self.t_end      = self.Param["End_time"]
-            self.deg        = self.Param["Polynomial_degree"]
+            self.deg        = int(self.Param["Polynomial_degree"])
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
@@ -48,7 +49,7 @@ class RayleghTaylor:
     def build_mesh(self):
         #Generate mesh
         try:
-            n_points = self.Param["Number_vertices"]
+            n_points = int(self.Param["Number_vertices"])
             self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.Param["Base"], self.Param["Height"]), n_points, n_points)
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
@@ -80,20 +81,21 @@ class RayleghTaylor:
         #Define function for reinitialization
         self.phi0 = Function(self.Q)
 
+
     """Set the proper initial condition"""
     def set_initial_condition(self):
         #Read from configuration file center and radius
         try:
-            center = Point(self.param["x_center"], self.param["y_center"])
-            radius = self.param["Radius"]
+            center = Point(self.Param["x_center"], self.Param["y_center"])
+            radius = self.Param["Radius"]
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
         #Set initial condition of bubble and check geoemtric limits
         f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))-r",
-                        A = center[0], B = center[1], r = radius)
-        assert (center[0] - radius > 0.0 and center[0] + radius < self.Param["Base"] and
-                center[1] - radius > 0.0 and center[1] + radius < self.Param["Height"]),
+                        A = center[0], B = center[1], r = radius, degree = 2)
+        assert center[0] - radius > 0.0 and center[0] + radius < self.Param["Base"] and\
+               center[1] - radius > 0.0 and center[1] + radius < self.Param["Height"],\
                 "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
@@ -162,6 +164,7 @@ class RayleghTaylor:
         self.A2 = assemble(a2)
         self.b2 = assemble(L2)
 
+
     """Build the system for Level set reinitialization"""
     def Levelset_reinit(self):
         dt = Constant(0.0001)
@@ -219,8 +222,10 @@ class RayleghTaylor:
             #Apply reinitialization for level-set
             try:
                 self.Levelset_reinit()
-            except RuntimeError:
-                print("\nAborting simulation...")
+            except RuntimeError as e:
+                print(e)
+                print("Aborting simulation...")
+                sys.exit(1)
 
             #Plot level-set solution
             plot(self.phi_curr, interactive = True)
