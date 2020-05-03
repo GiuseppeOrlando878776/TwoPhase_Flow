@@ -77,6 +77,8 @@ class RayleghTaylor:
         self.w_curr   = Function(self.W)
         self.phi_curr = Function(self.Q)
 
+        #Define function for reinitialization
+        self.phi0 = Function(self.Q)
 
     """Set the proper initial condition"""
     def set_initial_condition(self):
@@ -160,6 +162,34 @@ class RayleghTaylor:
         self.A2 = assemble(a2)
         self.b2 = assemble(L2)
 
+    """Build the system for Level set reinitialization"""
+    def Levelset_reinit(self):
+        dt = Constant(0.0001)
+        eps = Constant(1.0e-4)
+        alpha = Constant(0.0625)
+        signp = ufl.sign(self.phi)
+
+        a3 = self.phi/dt*self.l*dx
+        L3 = self.phi0/dt*self.l*dx + signp*(1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
+             alpha*inner(grad(self.phi0), grad(self.l))* dx
+
+        E_old = 1e10
+        for n in range(10):
+            #Set previous step solution
+            self.phi0.assign(self.phi)
+
+            #Solve the system
+            solve(a3 == L3, self.phi, [])
+
+            #Compute the error and check no divergence
+            error = (((self.phi - self.phi0)/dt)**2)*dx
+            E = sqrt(abs(assemble(error)))
+
+            if(E_old < E):
+                raise RuntimeError("Divergence at the reinitialization level (iteration )" + str(n + 1))
+
+            E_old = E
+
 
     """Execute simulation"""
     def run(self):
@@ -185,6 +215,12 @@ class RayleghTaylor:
             #Solve level-set
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
+
+            #Apply reinitialization for level-set
+            try:
+                self.Levelset_reinit()
+            except RuntimeError:
+                print("\nAborting simulation...")
 
             #Plot level-set solution
             plot(self.phi_curr, interactive = True)
