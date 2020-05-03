@@ -149,7 +149,7 @@ class RayleghTaylor:
         alpha = Constant(0.0625)
 
         self.a3 = self.phi/dt*self.l*dx
-        self.L3 = self.phi0/dt*self.l*dx + ufl.sign(self.phi)*\
+        self.L3 = self.phi0/dt*self.l*dx + ufl.sign(self.phi0)*\
                   (1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                   alpha*inner(grad(self.phi0), grad(self.l))* dx
 
@@ -197,13 +197,13 @@ class RayleghTaylor:
 
         for n in range(10):
             #Set previous step solution
-            self.phi0.assign(self.phi)
+            self.phi0.assign(self.phi_curr)
 
             #Solve the system
-            solve(self.a3 == self.L3, self.phi, [])
+            solve(self.a3 == self.L3, self.phi_curr, [])
 
             #Compute the error and check no divergence
-            error = (((self.phi - self.phi0)/dt)**2)*dx
+            error = (((self.phi_curr - self.phi0)/dt)**2)*dx
             E = sqrt(abs(assemble(error)))
 
             if(E_old < E):
