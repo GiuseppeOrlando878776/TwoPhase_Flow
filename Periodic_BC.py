@@ -1,4 +1,4 @@
-from fenics import *
+from dolfin import *
 
 """Sub domain for Periodic boundary condition"""
 class PeriodicBoundary(SubDomain):

@@ -1,4 +1,4 @@
-from fenics import *
+from dolfin import *
 import numpy as np
 import ufl
 

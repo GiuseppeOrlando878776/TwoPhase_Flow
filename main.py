@@ -1,6 +1,4 @@
-from My_Parameters import My_Parameters
 from sys import argv
-from fenics import *
 from Raylegh_Taylor import *
 
 def main():

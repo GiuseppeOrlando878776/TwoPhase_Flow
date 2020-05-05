@@ -1,4 +1,4 @@
-from fenics import Parameters
+from dolfin import Parameters
 
 
 """This class reads parameter files specific for the problem.

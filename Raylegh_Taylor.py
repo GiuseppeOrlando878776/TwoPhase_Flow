@@ -2,8 +2,6 @@ from My_Parameters import My_Parameters
 from Auxiliary_Functions import *
 from Periodic_BC import WallBoundary
 
-from fenics import *
-import ufl, sys
 
 class RayleghTaylor:
     """Class constructor"""
@@ -123,8 +121,8 @@ class RayleghTaylor:
         F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
            + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
            + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
-           + 1.0/self.At*dot(self.rho_old*self.g*self.e2, self.v)*dx
-           #- 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx
+           + 1.0/self.At*inner(self.rho_old*self.g*self.e2, self.v)*dx\
+           - 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx(domain=self.mesh)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -237,7 +235,7 @@ class RayleghTaylor:
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
-            
+
             #Solve level-set
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
