@@ -1,7 +1,9 @@
 from My_Parameters import My_Parameters
 from Auxiliary_Functions import *
 from Periodic_BC import WallBoundary
+from dolfin import begin
 
+from sys import exit
 
 class RayleghTaylor:
     """Class constructor"""
@@ -59,7 +61,7 @@ class RayleghTaylor:
         self.n = FacetNormal(self.mesh)
         self.h = CellDiameter(self.mesh)
         self.h_avg = (self.h('+') + self.h('-'))/2.0
-        self.alpha = Constant(0.1)
+        self.alpha = Constant(0.1) #Penalty parameter
 
         #Define function spaces
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
@@ -121,8 +123,8 @@ class RayleghTaylor:
         F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
            + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
            + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
-           + 1.0/self.At*inner(self.rho_old*self.g*self.e2, self.v)*dx\
-           - 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx(domain=self.mesh)
+          # + 1.0/self.At*inner(self.rho_old*self.g*self.e2, self.v)*dx\
+          # - 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx(domain=self.mesh)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -133,7 +135,7 @@ class RayleghTaylor:
 
         #Define variational problem for step 2 (Level-set)
         F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
-           - inner(self.phi*self.u_curr, grad(self.l))*dx \
+           + inner(self.u_curr, grad(self.phi))*self.l*dx \
            + self.IP(self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -232,21 +234,24 @@ class RayleghTaylor:
             print("t = ",str(t))
 
             #Solve Navier-Stokes
+            print("Solving Navier-Stokes")
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
 
             #Solve level-set
+            print("Solving Level-set")
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
 
             #Apply reinitialization for level-set
             try:
+                print("Solving reinitialization")
                 self.Levelset_reinit()
             except RuntimeError as e:
                 print(e)
                 print("Aborting simulation...")
-                sys.exit(1)
+                exit(1)
 
             #Plot level-set solution
             plot(self.phi_curr, interactive = True)
@@ -256,4 +261,4 @@ class RayleghTaylor:
             (self.u_old, self.p_old) = self.w_old.split()
             self.phi_old.assign(self.phi_curr)
 
-            t = t + self.dt if t + self.dt <= self.t_end else self.t_end
+            t = t + self.dt if t + self.dt <= self.t_end or abs(t - self.t_end) < DOLFIN_EPS else self.t_end
