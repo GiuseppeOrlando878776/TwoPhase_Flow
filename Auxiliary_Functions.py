@@ -6,10 +6,6 @@ import ufl
 def D(u):
     return sym(grad(u))
 
-"""Define stress tensor"""
-def sigma(mu, u, p):
-    return 2.0*mu*D(u) - p*Identity(len(u))
-
 
 """'Continuous Heaviside approximation'"""
 def CHeaviside(psi, eps):

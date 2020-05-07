@@ -107,8 +107,8 @@ class RayleghTaylor:
         self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
 
-        self.rho_old = Function(self.Q)
-        self.mu_old  = Function(self.Q)
+        #self.rho_old = Function(self.Q)
+        #self.mu_old  = Function(self.Q)
 
 
     """Interior penalty method"""
@@ -120,9 +120,10 @@ class RayleghTaylor:
     """Set weak formulations"""
     def set_weak_forms(self):
         #Define variational problem for step 1 (Navier-Stokes)
-        F1 = self.rho_old*inner((self.u - self.u_old) / self.DT, self.v)*dx \
-           + self.rho_old*inner(dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
-           + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p), grad(self.v))*dx \
+        F1 = self.rho(self.phi_old,1e-4)*(inner((self.u - self.u_old) / self.DT, self.v) + \
+                                          inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
+           + 2.0/self.Re*self.mu(self.phi_old,1e-4)*inner(D(self.u), grad(self.v))*dx\
+           - 1.0/self.Re*self.p*div(self.v)*dx\
            + div(self.u)*self.q*dx\
           # + 1.0/self.At*inner(self.rho_old*self.g*self.e2, self.v)*dx\
           # - 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx(domain=self.mesh)
@@ -174,10 +175,6 @@ class RayleghTaylor:
 
     """Build the system for Navier-Stokes simulation"""
     def assemble_NS_system(self):
-        #Compute actual density and viscosity.
-        self.rho_old = self.rho(self.phi_old, 1e-4)
-        self.mu_old  = self.mu(self.phi_old, 1e-4)
-
         # Assemble matrices and right-hand sides
         assemble(self.a1, tensor = self.A1)
         assemble(self.L1, tensor = self.b1)
@@ -239,6 +236,7 @@ class RayleghTaylor:
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
+            #print(np.any(np.isnan(self.w_curr.vector().get_local())))
 
             #Solve level-set
             print("Solving Level-set")
