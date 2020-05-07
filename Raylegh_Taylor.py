@@ -120,9 +120,10 @@ class RayleghTaylor:
     """Set weak formulations"""
     def set_weak_forms(self):
         #Define variational problem for step 1 (Navier-Stokes)
-        F1 = inner(self.rho_old*(self.u - self.u_old) / self.DT, self.v)*dx \
-           + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
-           + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p_old), nabla_grad(self.v))*dx \
+        F1 = self.rho_old*inner((self.u - self.u_old) / self.DT, self.v)*dx \
+           + self.rho_old*inner(dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
+           + 1.0/self.Re*inner(sigma(self.mu_old, self.u, self.p), grad(self.v))*dx \
+           + div(self.u)*self.q*dx\
           # + 1.0/self.At*inner(self.rho_old*self.g*self.e2, self.v)*dx\
           # - 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx(domain=self.mesh)
 

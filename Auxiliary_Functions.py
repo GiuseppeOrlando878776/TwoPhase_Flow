@@ -4,11 +4,11 @@ import ufl
 
 """Define symmetric gradient"""
 def D(u):
-    return sym(nabla_grad(u))
+    return sym(grad(u))
 
 """Define stress tensor"""
 def sigma(mu, u, p):
-    return 2*mu*D(u) - p*Identity(len(u))
+    return 2.0*mu*D(u) - p*Identity(len(u))
 
 
 """'Continuous Heaviside approximation'"""
