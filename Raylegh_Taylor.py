@@ -128,6 +128,13 @@ class RayleghTaylor:
         return r
 
 
+    """SUPG method"""
+    def SUPG(self, phi, l):
+        r = ((phi - self.phi_old)/self.DT + inner(self.u_curr, grad(phi)))* \
+            1.0/ufl.Max(2.0*sqrt(inner(self.u_curr,self.u_curr)),4.0/self.Re/self.h/self.h)*\
+            inner(self.u_curr,self.u_curr)*inner(self.u_curr, grad(l))*dx
+        return r
+
     """Set weak formulations"""
     def set_weak_forms(self):
         #Define variational problem for step 1 (Navier-Stokes)
@@ -253,6 +260,7 @@ class RayleghTaylor:
             print("Solving Level-set")
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
+            print(self.phi_curr.vector().get_local())
 
             #Apply reinitialization for level-set
             try:
