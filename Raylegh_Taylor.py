@@ -1,7 +1,6 @@
 from My_Parameters import My_Parameters
 from Auxiliary_Functions import *
 from Periodic_BC import WallBoundary
-from dolfin import begin
 
 from sys import exit
 
@@ -66,9 +65,13 @@ class RayleghTaylor:
         #Parameter for interface thickness
         self.eps = 1.0e-4
         self.alpha = Constant(0.1) #Penalty parameter
-        hmax = self.mesh.hmax()
-        self.eps_reinit = Constant(1.0/hmax)
-        self.alpha_reinit = Constant(0.0625/hmax)
+
+        #Parameters for reinitialization steps
+        hmin = self.mesh.hmin()
+        self.eps_reinit = Constant(hmin)
+        self.alpha_reinit = Constant(0.0625*hmin)
+        self.dt_reinit = Constant(0.0001) #We choose an explicit treatment to maintain the linearity
+                                          #and so a very small step is needed
 
         #Define function spaces
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
@@ -156,8 +159,6 @@ class RayleghTaylor:
         self.b2 = Vector()
 
         #Set weak form for level-set reinitialization
-        self.dt_reinit = Constant(0.0001)
-
         self.a3 = self.phi/self.dt_reinit*self.l*dx
         self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
                   signp(self.phi_curr, self.eps_reinit)*\
@@ -203,14 +204,13 @@ class RayleghTaylor:
         E_old = 1e10
         self.phi0.assign(self.phi_curr)
 
-        for n in range(100):
+        for n in range(10):
             #Solve the system
             solve(self.a3 == self.L3, self.phi_intermediate, [])
 
             #Compute the error and check no divergence
             error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
             E = sqrt(abs(assemble(error)))
-            #print(E)
 
             if(E_old < E):
                 raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
