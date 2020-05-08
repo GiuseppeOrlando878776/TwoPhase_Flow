@@ -63,6 +63,13 @@ class RayleghTaylor:
         self.h_avg = (self.h('+') + self.h('-'))/2.0
         self.alpha = Constant(0.1) #Penalty parameter
 
+        #Parameter for interface thickness
+        self.eps = 1.0e-4
+        self.alpha = Constant(0.1) #Penalty parameter
+        hmax = self.mesh.hmax()
+        self.eps_reinit = Constant(1.0/hmax)
+        self.alpha_reinit = Constant(0.0625/hmax)
+
         #Define function spaces
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
         Qelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
@@ -84,6 +91,7 @@ class RayleghTaylor:
 
         #Define function for reinitialization
         self.phi0 = Function(self.Q)
+        self.phi_intermediate = Function(self.Q)
 
 
     """Set the proper initial condition"""
@@ -120,9 +128,9 @@ class RayleghTaylor:
     """Set weak formulations"""
     def set_weak_forms(self):
         #Define variational problem for step 1 (Navier-Stokes)
-        F1 = self.rho(self.phi_old,1e-4)*(inner((self.u - self.u_old) / self.DT, self.v) + \
+        F1 = self.rho(self.phi_old,self.eps)*(inner((self.u - self.u_old) / self.DT, self.v) + \
                                           inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-           + 2.0/self.Re*self.mu(self.phi_old,1e-4)*inner(D(self.u), grad(self.v))*dx\
+           + 2.0/self.Re*self.mu(self.phi_old,self.eps)*inner(D(self.u), grad(self.v))*dx\
            - 1.0/self.Re*self.p*div(self.v)*dx\
            + div(self.u)*self.q*dx\
           # + 1.0/self.At*inner(self.rho_old*self.g*self.e2, self.v)*dx\
@@ -148,14 +156,13 @@ class RayleghTaylor:
         self.b2 = Vector()
 
         #Set weak form for level-set reinitialization
-        self.deltat = Constant(0.0001)
-        eps = Constant(1.0e-4)
-        alpha = Constant(0.0625)
+        self.dt_reinit = Constant(0.0001)
 
-        self.a3 = self.phi/self.deltat*self.l*dx
-        self.L3 = self.phi0/self.deltat*self.l*dx + ufl.sign(self.phi0)*\
+        self.a3 = self.phi/self.dt_reinit*self.l*dx
+        self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
+                  signp(self.phi_curr, self.eps_reinit)*\
                   (1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
-                  alpha*inner(grad(self.phi0), grad(self.l))* dx
+                  self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
 
 
     """Assemble boundary condition"""
@@ -194,22 +201,27 @@ class RayleghTaylor:
     """Build the system for Level set reinitialization"""
     def Levelset_reinit(self):
         E_old = 1e10
+        self.phi0.assign(self.phi_curr)
 
-        for n in range(10):
-            #Set previous step solution
-            self.phi0.assign(self.phi_curr)
-
+        for n in range(100):
             #Solve the system
-            solve(self.a3 == self.L3, self.phi_curr, [])
+            solve(self.a3 == self.L3, self.phi_intermediate, [])
 
             #Compute the error and check no divergence
-            error = (((self.phi_curr - self.phi0)/self.deltat)**2)*dx
+            error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
             E = sqrt(abs(assemble(error)))
+            #print(E)
 
             if(E_old < E):
-                raise RuntimeError("Divergence at the reinitialization level (iteration )" + str(n + 1))
+                raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
 
             E_old = E
+
+            #Set previous step solution
+            self.phi0.assign(self.phi_intermediate)
+
+        #Assign the reinitialized level-set to the current solution
+        self.phi_curr.assign(self.phi_intermediate)
 
 
     """Execute simulation"""
@@ -236,7 +248,6 @@ class RayleghTaylor:
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
-            #print(np.any(np.isnan(self.w_curr.vector().get_local())))
 
             #Solve level-set
             print("Solving Level-set")
