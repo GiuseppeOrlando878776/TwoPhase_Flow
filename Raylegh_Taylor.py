@@ -19,13 +19,15 @@ class RayleghTaylor:
         self.Param = My_Parameters(param_name).get_param()
 
         try:
-            self.Re         = self.Param["Reynolds_number"]
-            self.At         = self.Param["Atwood_number"]
-            self.surf_coeff = self.Param["Surface_tension"]
-            self.rho1       = self.Param["Lighter_density"]
-            self.dt         = self.Param["Time_step"]
-            self.t_end      = self.Param["End_time"]
-            self.deg        = int(self.Param["Polynomial_degree"])
+            self.Re            = self.Param["Reynolds_number"]
+            self.At            = self.Param["Atwood_number"]
+            self.surf_coeff    = self.Param["Surface_tension"]
+            self.rho1          = self.Param["Lighter_density"]
+            self.dt            = self.Param["Time_step"]
+            self.t_end         = self.Param["End_time"]
+            self.deg           = int(self.Param["Polynomial_degree"])
+            self.reinit_method = self.reinit_type(int(self.Param["Reinit_Type"]))
+            self.stab_method   = self.stabilization_type(int(self.Param["Stabilization_Type"]))
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
@@ -43,6 +45,7 @@ class RayleghTaylor:
         self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
 
+        #Set parameters for standard output
         set_log_level(21)
 
 
@@ -68,16 +71,22 @@ class RayleghTaylor:
 
         #Parameters for reinitialization steps
         hmin = self.mesh.hmin()
-        self.eps_reinit = Constant(hmin)
-        self.alpha_reinit = Constant(0.0625*hmin)
-        self.dt_reinit = Constant(0.0001) #We choose an explicit treatment to maintain the linearity
-                                          #and so a very small step is needed
+        if(self.reinit_type == 'Non_Conservative'):
+            self.eps_reinit = Constant(hmin)
+            self.alpha_reinit = Constant(0.0625*hmin)
+            self.dt_reinit = Constant(0.0001) #We choose an explicit treatment to maintain the linearity
+                                              #and so a very small step is neede
+        elif(self.reinit_type == 'Conservative'):
+            self.dt_reinit = Constant(0.5*hmin**(1.1))
+            self.eps_reinit = Constant(0.5*hmin**(0.9))
 
         #Define function spaces
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
         Qelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
         self.W = FunctionSpace(self.mesh, Velem*Qelem)
         self.Q = FunctionSpace(self.mesh, Qelem)
+        if(self.reinit_type == 'Conservative'):
+            self.V = VectorFunctionSpace(self.mesh, Qelem*Qelem)
 
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
@@ -155,8 +164,12 @@ class RayleghTaylor:
 
         #Define variational problem for step 2 (Level-set)
         F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
-           + inner(self.u_curr, grad(self.phi))*self.l*dx \
-           + self.IP(self.phi, self.l)
+           + inner(self.u_curr, grad(self.phi))*self.l*dx
+
+        if(self.stab_method == 'IP'):
+           F2 += self.IP(self.phi, self.l)
+       elif(self.stab_method == 'SUPG'):
+           F2 += self.SUPG(self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -166,11 +179,20 @@ class RayleghTaylor:
         self.b2 = Vector()
 
         #Set weak form for level-set reinitialization
-        self.a3 = self.phi/self.dt_reinit*self.l*dx
-        self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
-                  signp(self.phi_curr, self.eps_reinit)*\
-                  (1.0 - sqrt(dot(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
-                  self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
+        if(self.reinit_type == 'Non_Conservative'):
+            self.a3 = self.phi/self.dt_reinit*self.l*dx
+            self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
+                      signp(self.phi_curr, self.eps_reinit)*\
+                      (1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
+                      self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
+        elif(self.reinit_type == 'Conservative'):
+            grad_n = project(self.phi_curr, self.V)
+            n = grad_n/sqrt(inner(grad_n,grad_n))
+            F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx\
+               - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))*inner(n, grad(self.l))*dx\
+               + self.eps_reinit*inner(n, grad((0.5*(self.phi + self.phi0))))*inner(n, grad(self.l))*dx
+            self.a3 = lhs(F3)
+            self.L3 = rhs(F3)
 
 
     """Assemble boundary condition"""

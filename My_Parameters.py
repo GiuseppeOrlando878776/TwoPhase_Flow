@@ -29,6 +29,8 @@ class My_Parameters:
             f.write("x_center = 0.5\n")
             f.write("y_center = 0.5\n")
             f.write("Radius = 0.2\n")
+            f.write("Reinit_Type = 1\n")
+            f.write("Stabilization_Type = 1\n")
             f.close()
             self.file = open(param_name, "r")
 
@@ -54,3 +56,15 @@ class My_Parameters:
     """Return the standard FENICS Parameters class"""
     def get_param(self):
         return self.Param
+
+
+    """Set type of reinitialization"""
+    def reinit_type(i):
+        switcher = {1:'Non_Conservative',2:'Conservative'}
+        return switcher.get(i, raise RuntimeError("Invalid option for reinitialization"))
+
+
+    """Set type of stabilization"""
+    def stabilization_type(i):
+        switcher = {1:'IP',2:'SUPG'}
+        return switcher.get(i, raise RuntimeError("Invalid option for stabilization"))
