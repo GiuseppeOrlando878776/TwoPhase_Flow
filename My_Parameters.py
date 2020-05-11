@@ -11,6 +11,14 @@ class My_Parameters:
     def __init__(self, param_name):
         self.Param = Parameters()
 
+        #Since these parameters are more related to the numeric part
+        #rather than physics we choose to set a default value in order to
+        #avoid problems in case they will not present in the file
+        self.Param.add("Polynomial_degree", 1)
+        self.Param.add("Reinit_Type", 1)
+        self.Param.add("Stabilization_Type", 1)
+        self.Param.add("Number_vertices", 64)
+
         try:
             self.file = open(param_name, "r")
         except IOError:
@@ -46,7 +54,10 @@ class My_Parameters:
             if line.strip(): #Avoid reading blank lines
                 idx_eq = line.find(' = ')
                 if(idx_eq != -1):
-                    self.Param.add(line[0 : idx_eq],float(line[idx_eq + 3 : -1]))
+                    if(line[0 : idx_eq] in self.Param.keys()):
+                        self.Param[line[0 : idx_eq]] = float(line[idx_eq + 3 : -1])
+                    else:
+                        self.Param.add(line[0 : idx_eq],float(line[idx_eq + 3 : -1]))
                 else:
                     raise Exception("Invalid format to read parameters. \
                                      Please check the configuration file: \

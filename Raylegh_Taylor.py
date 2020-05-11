@@ -25,11 +25,15 @@ class RayleghTaylor:
             self.rho1          = self.Param["Lighter_density"]
             self.dt            = self.Param["Time_step"]
             self.t_end         = self.Param["End_time"]
-            self.deg           = int(self.Param["Polynomial_degree"])
-            self.reinit_method = self.reinit_type(int(self.Param["Reinit_Type"]))
-            self.stab_method   = self.stabilization_type(int(self.Param["Stabilization_Type"]))
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
+
+        #Since this parameters are more related to the numeric part
+        #rather than physics we choose to set a default value
+        #even though they are not present in the file
+        self.deg = int(self.Param["Polynomial_degree"])
+        self.reinit_method = self.reinit_type(int(self.Param["Reinit_Type"]))
+        self.stab_method   = self.stabilization_type(int(self.Param["Stabilization_Type"]))
 
         #Compute heavier density
         self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
