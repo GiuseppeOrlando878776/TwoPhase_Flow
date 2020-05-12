@@ -18,6 +18,7 @@ class My_Parameters:
         self.Param.add("Reinit_Type", 'Conservative')
         self.Param.add("Stabilization_Type", 'IP')
         self.Param.add("Number_vertices", 64)
+        self.Param.add("Log_Level", 40) #ERROR level by default
 
         try:
             self.file = open(param_name, "r")
@@ -55,7 +56,7 @@ class My_Parameters:
                 idx_eq = line.find(' = ')
                 if(idx_eq != -1):
                     if(line[0 : idx_eq] in self.Param.keys()):
-                        self.Param[line[0 : idx_eq]] = line[idx_eq + 3 : -1])
+                        self.Param[line[0 : idx_eq]] = line[idx_eq + 3 : -1]
                     else:
                         self.Param.add(line[0 : idx_eq],line[idx_eq + 3 : -1])
                 else:

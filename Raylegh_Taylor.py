@@ -46,7 +46,8 @@ class RayleghTaylor:
 
         #Check correctness of reinitialization method (in order to avoid typos in particular
         #since, contrarly to stabilization, it is more difficult to think to other choises)
-        assert self.reinit_method in ['Conservative','Non_Conservative']
+        assert self.reinit_method in ['Conservative','Non_Conservative'], \
+               "Reinitialization method not available"
 
         #Compute heavier density
         self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
@@ -62,8 +63,8 @@ class RayleghTaylor:
         self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
 
-        #Set parameters for standard output
-        set_log_level(21)
+        #Set parameter for standard output
+        set_log_level(int(self.Param["Log_Level"]))
 
 
     """Build the mesh for the simulation"""
@@ -297,24 +298,26 @@ class RayleghTaylor:
         #Time-stepping loop
         t = self.dt
         while t <= self.t_end:
-            print("t = ",str(t))
+            info("t = " + str(t))
 
             #Solve Navier-Stokes
-            print("Solving Navier-Stokes")
+            begin(int(LogLevel.TRACE),"Solving Navier-Stokes")
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
+            end()
 
             #Solve level-set
-            print("Solving Level-set")
+            begin(int(LogLevel.TRACE),"Solving Level-set")
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
             #print(self.phi_curr.vector().get_local())
 
             #Apply reinitialization for level-set
             try:
-                print("Solving reinitialization")
+                begin(int(LogLevel.TRACE),"Solving reinitialization")
                 self.Levelset_reinit()
+                end()
             except RuntimeError as e:
                 print(e)
                 print("Aborting simulation...")
