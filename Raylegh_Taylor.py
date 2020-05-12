@@ -19,12 +19,12 @@ class RayleghTaylor:
         self.Param = My_Parameters(param_name).get_param()
 
         try:
-            self.Re            = self.Param["Reynolds_number"]
-            self.At            = self.Param["Atwood_number"]
-            self.surf_coeff    = self.Param["Surface_tension"]
-            self.rho1          = self.Param["Lighter_density"]
-            self.dt            = self.Param["Time_step"]
-            self.t_end         = self.Param["End_time"]
+            self.Re            = float(self.Param["Reynolds_number"])
+            self.At            = float(self.Param["Atwood_number"])
+            self.surf_coeff    = float(self.Param["Surface_tension"])
+            self.rho1          = float(self.Param["Lighter_density"])
+            self.dt            = float(self.Param["Time_step"])
+            self.t_end         = float(self.Param["End_time"])
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
@@ -32,8 +32,8 @@ class RayleghTaylor:
         #rather than physics we set a default value
         #and so they are present for sure
         self.deg = int(self.Param["Polynomial_degree"])
-        self.reinit_method = self.reinit_type(int(self.Param["Reinit_Type"]))
-        self.stab_method   = self.stabilization_type(int(self.Param["Stabilization_Type"]))
+        self.reinit_method = self.Param["Reinit_Type"]
+        self.stab_method   = self.Param["Stabilization_Type"]
 
         #Compute heavier density
         self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
@@ -58,8 +58,8 @@ class RayleghTaylor:
         #Generate mesh
         try:
             n_points = int(self.Param["Number_vertices"])
-            self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.Param["Base"], self.Param["Height"]), \
-                                      n_points, n_points)
+            self.mesh = RectangleMesh(Point(0.0, 0.0), float(Point(self.Param["Base"]), \
+                                      float(self.Param["Height"])), n_points, n_points)
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
@@ -74,12 +74,12 @@ class RayleghTaylor:
 
         #Parameters for reinitialization steps
         hmin = self.mesh.hmin()
-        if(self.reinit_type == 'Non_Conservative'):
+        if(self.reinit_method == 'Non_Conservative'):
             self.eps_reinit = Constant(hmin)
             self.alpha_reinit = Constant(0.0625*hmin)
             self.dt_reinit = Constant(0.0001) #We choose an explicit treatment to maintain the linearity
                                               #and so a very small step is neede
-        elif(self.reinit_type == 'Conservative'):
+        elif(self.reinit_method == 'Conservative'):
             self.dt_reinit = Constant(0.5*hmin**(1.1))
             self.eps_reinit = Constant(0.5*hmin**(0.9))
 
@@ -118,16 +118,16 @@ class RayleghTaylor:
     def set_initial_condition(self):
         #Read from configuration file center and radius
         try:
-            center = Point(self.Param["x_center"], self.Param["y_center"])
-            radius = self.Param["Radius"]
+            center = Point(float(self.Param["x_center"]), float(self.Param["y_center"]))
+            radius = float(self.Param["Radius"])
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
         #Set initial condition of bubble and check geoemtric limits
         f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))-r",
                         A = center[0], B = center[1], r = radius, degree = 2)
-        assert center[0] - radius > 0.0 and center[0] + radius < self.Param["Base"] and\
-               center[1] - radius > 0.0 and center[1] + radius < self.Param["Height"],\
+        assert center[0] - radius > 0.0 and center[0] + radius < float(self.Param["Base"]) and \
+               center[1] - radius > 0.0 and center[1] + radius < float(self.Param["Height"]),\
                 "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
@@ -190,13 +190,13 @@ class RayleghTaylor:
         self.b2 = Vector()
 
         #Set weak form for level-set reinitialization
-        if(self.reinit_type == 'Non_Conservative'):
+        if(self.reinit_method == 'Non_Conservative'):
             self.a3 = self.phi/self.dt_reinit*self.l*dx
             self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
                       signp(self.phi_curr, self.eps_reinit)*\
                       (1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                       self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
-        elif(self.reinit_type == 'Conservative'):
+        elif(self.reinit_method == 'Conservative'):
             F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx\
                - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))* \
                  inner(self.n, grad(self.l))*dx \

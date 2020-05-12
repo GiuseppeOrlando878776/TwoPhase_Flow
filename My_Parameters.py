@@ -15,8 +15,8 @@ class My_Parameters:
         #rather than physics we choose to set a default value in order to
         #avoid problems in case they will not present in the file
         self.Param.add("Polynomial_degree", 1)
-        self.Param.add("Reinit_Type", 1)
-        self.Param.add("Stabilization_Type", 1)
+        self.Param.add("Reinit_Type", 'Conservative')
+        self.Param.add("Stabilization_Type", 'IP')
         self.Param.add("Number_vertices", 64)
 
         try:
@@ -37,8 +37,8 @@ class My_Parameters:
             f.write("x_center = 0.5\n")
             f.write("y_center = 0.5\n")
             f.write("Radius = 0.2\n")
-            f.write("Reinit_Type = 1\n")
-            f.write("Stabilization_Type = 1\n")
+            f.write("Reinit_Type = 'Conservative'\n")
+            f.write("Stabilization_Type = 'IP'\n")
             f.close()
             self.file = open(param_name, "r")
 
@@ -55,9 +55,9 @@ class My_Parameters:
                 idx_eq = line.find(' = ')
                 if(idx_eq != -1):
                     if(line[0 : idx_eq] in self.Param.keys()):
-                        self.Param[line[0 : idx_eq]] = float(line[idx_eq + 3 : -1])
+                        self.Param[line[0 : idx_eq]] = line[idx_eq + 3 : -1])
                     else:
-                        self.Param.add(line[0 : idx_eq],float(line[idx_eq + 3 : -1]))
+                        self.Param.add(line[0 : idx_eq],line[idx_eq + 3 : -1])
                 else:
                     raise Exception("Invalid format to read parameters. \
                                      Please check the configuration file: \
@@ -67,15 +67,3 @@ class My_Parameters:
     """Return the standard FENICS Parameters class"""
     def get_param(self):
         return self.Param
-
-
-    """Set type of reinitialization"""
-    def reinit_type(i):
-        switcher = {1:'Non_Conservative',2:'Conservative'}
-        return switcher.get(i, raise RuntimeError("Invalid option for reinitialization"))
-
-
-    """Set type of stabilization"""
-    def stabilization_type(i):
-        switcher = {1:'IP',2:'SUPG'}
-        return switcher.get(i, raise RuntimeError("Invalid option for stabilization"))
