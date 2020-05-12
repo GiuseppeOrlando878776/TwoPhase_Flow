@@ -35,6 +35,19 @@ class RayleghTaylor:
         self.reinit_method = self.Param["Reinit_Type"]
         self.stab_method   = self.Param["Stabilization_Type"]
 
+        #Define an auxiliary dictionary to set proper stabilization
+        try:
+            self.switcher_stab = {'IP':self.IP, 'SUPG':self.SUPG}
+        except NameError as e:
+            print("Stabilization method " + str(e).split("'")[1] + " declared but not implemented")
+            exit(1)
+        assert self.stab_method in self.switcher_stab, \
+               "Stabilization method not available"
+
+        #Check correctness of reinitialization method (in order to avoid typos in particular
+        #since, contrarly to stabilization, it is more difficult to think to other choises)
+        assert self.reinit_method in ['Conservative','Non_Conservative']
+
         #Compute heavier density
         self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
 
@@ -48,15 +61,6 @@ class RayleghTaylor:
         self.DT = Constant(self.dt)
         self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
-
-        #Define an auxiliary dictionary to set proper stabilization
-        try:
-            self.switcher_stab = {'IP':self.IP, 'SUPG':self.SUPG}
-        except NameError as e:
-            print("Stabilization method " + str(e).split("'")[1] + " declared but not implemented")
-            exit(1)
-        assert self.stab_method in self.switcher_stab, \
-               "Stabilization method not available"
 
         #Set parameters for standard output
         set_log_level(21)
@@ -87,7 +91,7 @@ class RayleghTaylor:
             self.eps_reinit = Constant(hmin)
             self.alpha_reinit = Constant(0.0625*hmin)
             self.dt_reinit = Constant(0.0001) #We choose an explicit treatment to maintain the linearity
-                                              #and so a very small step is neede
+                                              #and so a very small step is needed
         elif(self.reinit_method == 'Conservative'):
             self.dt_reinit = Constant(0.5*hmin**(1.1))
             self.eps_reinit = Constant(0.5*hmin**(0.9))
