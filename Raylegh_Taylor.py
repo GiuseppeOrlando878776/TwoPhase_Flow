@@ -1,6 +1,6 @@
 from My_Parameters import My_Parameters
 from Auxiliary_Functions import *
-from Periodic_BC import WallBoundary
+from Boundary_Conditions import WallBoundary
 
 from sys import exit
 
@@ -31,7 +31,7 @@ class RayleghTaylor:
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
         #and so they are present for sure
-        self.deg = int(self.Param["Polynomial_degree"])
+        self.deg = self.Param["Polynomial_degree"]
         self.reinit_method = self.Param["Reinit_Type"]
         self.stab_method   = self.Param["Stabilization_Type"]
 
@@ -64,7 +64,7 @@ class RayleghTaylor:
         self.e2 = Constant((0.0,1.0))
 
         #Set parameter for standard output
-        set_log_level(int(self.Param["Log_Level"]))
+        set_log_level(self.Param["Log_Level"])
 
 
     """Build the mesh for the simulation"""
@@ -72,8 +72,9 @@ class RayleghTaylor:
         #Generate mesh
         try:
             n_points = int(self.Param["Number_vertices"])
-            self.mesh = RectangleMesh(Point(0.0, 0.0), float(Point(self.Param["Base"]), \
-                                      float(self.Param["Height"])), n_points, n_points)
+            self.mesh = RectangleMesh(Point(0.0, 0.0), \
+                                      Point(float(self.Param["Base"]), float(self.Param["Height"])), \
+                                      n_points, n_points)
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
 
@@ -98,12 +99,13 @@ class RayleghTaylor:
             self.eps_reinit = Constant(0.5*hmin**(0.9))
 
         #Define function spaces
-        Velem   = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
-        Qelem   = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
-        Phielem = FiniteElement("Lagrange", self.mesh,ufl_cell(), 2)
+        Velem        = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
+        Qelem        = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
+        Phielem      = FiniteElement("Lagrange", self.mesh.ufl_cell(), 2)
+        Grad_Phielem = VectorElement("Lagrange", self.mesh.ufl_cell(), 1)
         self.W  = FunctionSpace(self.mesh, Velem*Qelem)
         self.Q  = FunctionSpace(self.mesh, Phielem)
-        self.Q2 = FunctionSpace(self.mesh, Phielem*Phielem)
+        self.Q2 = FunctionSpace(self.mesh, Grad_Phielem)
 
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
@@ -298,24 +300,25 @@ class RayleghTaylor:
         #Time-stepping loop
         t = self.dt
         while t <= self.t_end:
-            info("t = " + str(t))
+            begin(int(LogLevel.INFO) + 1,"t = " + str(t))
 
             #Solve Navier-Stokes
-            begin(int(LogLevel.TRACE),"Solving Navier-Stokes")
+            begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
             end()
 
             #Solve level-set
-            begin(int(LogLevel.TRACE),"Solving Level-set")
+            begin(int(LogLevel.INFO) + 1,"Solving Level-set")
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
+            end()
             #print(self.phi_curr.vector().get_local())
 
             #Apply reinitialization for level-set
             try:
-                begin(int(LogLevel.TRACE),"Solving reinitialization")
+                begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                 self.Levelset_reinit()
                 end()
             except RuntimeError as e:
@@ -325,6 +328,8 @@ class RayleghTaylor:
 
             #Plot level-set solution
             plot(self.phi_curr, interactive = True)
+
+            end()
 
             #Prepare to next step assign previous-step solution
             self.w_old.assign(self.w_curr)

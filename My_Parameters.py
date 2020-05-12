@@ -15,10 +15,10 @@ class My_Parameters:
         #rather than physics we choose to set a default value in order to
         #avoid problems in case they will not present in the file
         self.Param.add("Polynomial_degree", 1)
-        self.Param.add("Reinit_Type", 'Conservative')
+        self.Param.add("Reinit_Type", 'Non_Conservative')
         self.Param.add("Stabilization_Type", 'IP')
         self.Param.add("Number_vertices", 64)
-        self.Param.add("Log_Level", 40) #ERROR level by default
+        self.Param.add("Log_Level", 21) #more than INFO level by default
 
         try:
             self.file = open(param_name, "r")
@@ -56,7 +56,7 @@ class My_Parameters:
                 idx_eq = line.find(' = ')
                 if(idx_eq != -1):
                     if(line[0 : idx_eq] in self.Param.keys()):
-                        self.Param[line[0 : idx_eq]] = line[idx_eq + 3 : -1]
+                        self.Param[line[0 : idx_eq]] = type(self.Param[line[0 : idx_eq]])(line[idx_eq + 3 : -1])
                     else:
                         self.Param.add(line[0 : idx_eq],line[idx_eq + 3 : -1])
                 else:
