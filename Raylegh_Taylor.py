@@ -49,6 +49,15 @@ class RayleghTaylor:
         self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
 
+        #Define an auxiliary dictionary to set proper stabilization
+        try:
+            self.switcher_stab = {'IP':self.IP, 'SUPG':self.SUPG}
+        except NameError as e:
+            print("Stabilization method " + str(e).split("'")[1] + " declared but not implemented")
+            exit(1)
+        assert self.stab_method in self.switcher_stab, \
+               "Stabilization method not available"
+
         #Set parameters for standard output
         set_log_level(21)
 
@@ -177,10 +186,7 @@ class RayleghTaylor:
         F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
            + inner(self.u_curr, grad(self.phi))*self.l*dx
 
-        if(self.stab_method == 'IP'):
-           F2 += self.IP(self.phi, self.l)
-       elif(self.stab_method == 'SUPG'):
-           F2 += self.SUPG(self.phi, self.l)
+        F2 += self.switcher_stab[self.stab_method](self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
