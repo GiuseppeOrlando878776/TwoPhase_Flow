@@ -29,8 +29,8 @@ class RayleghTaylor:
             print(str(e) +  "\nPlease check configuration file")
 
         #Since this parameters are more related to the numeric part
-        #rather than physics we choose to set a default value
-        #even though they are not present in the file
+        #rather than physics we set a default value
+        #and so they are present for sure
         self.deg = int(self.Param["Polynomial_degree"])
         self.reinit_method = self.reinit_type(int(self.Param["Reinit_Type"]))
         self.stab_method   = self.stabilization_type(int(self.Param["Stabilization_Type"]))
@@ -64,10 +64,9 @@ class RayleghTaylor:
             print(str(e) +  "\nPlease check configuration file")
 
         #Prepare useful variables for Interior Penalty
-        self.n = FacetNormal(self.mesh)
-        self.h = CellDiameter(self.mesh)
-        self.h_avg = (self.h('+') + self.h('-'))/2.0
-        self.alpha = Constant(0.1) #Penalty parameter
+        self.n_mesh = FacetNormal(self.mesh)
+        self.h      = CellDiameter(self.mesh)
+        self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
         #Parameter for interface thickness
         self.eps = 1.0e-4
@@ -85,12 +84,12 @@ class RayleghTaylor:
             self.eps_reinit = Constant(0.5*hmin**(0.9))
 
         #Define function spaces
-        Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
-        Qelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
-        self.W = FunctionSpace(self.mesh, Velem*Qelem)
-        self.Q = FunctionSpace(self.mesh, Qelem)
-        if(self.reinit_type == 'Conservative'):
-            self.V = VectorFunctionSpace(self.mesh, Qelem*Qelem)
+        Velem   = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
+        Qelem   = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
+        Phielem = FiniteElement("Lagrange", self.mesh,ufl_cell(), 2)
+        self.W  = FunctionSpace(self.mesh, Velem*Qelem)
+        self.Q  = FunctionSpace(self.mesh, Phielem)
+        self.Q2 = FunctionSpace(self.mesh, Phielem*Phielem)
 
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
@@ -107,7 +106,12 @@ class RayleghTaylor:
 
         #Define function for reinitialization
         self.phi0 = Function(self.Q)
-        self.phi_intermediate = Function(self.Q)
+        self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
+                                                 #reinitialization and it is also useful for clearness
+
+        #Define function for normal to the interface
+        self.grad_phi = Function(self.Q2)
+        self.n = Function(self.Q2)
 
 
     """Set the proper initial condition"""
@@ -131,13 +135,15 @@ class RayleghTaylor:
         self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
 
-        #self.rho_old = Function(self.Q)
-        #self.mu_old  = Function(self.Q)
+        #Compute normal vector to the surface
+        self.grad_phi = project(grad(self.phi_old), self.Q2)
+        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
     """Interior penalty method"""
     def IP(self, phi, l):
-        r = self.alpha*self.h_avg*self.h_avg*inner(jump(grad(phi),self.n), jump(grad(l),self.n))*dS
+        r = self.alpha*self.h_avg*self.h_avg* \
+            inner(jump(grad(phi),self.n_mesh), jump(grad(l),self.n_mesh))*dS
         return r
 
 
@@ -147,6 +153,7 @@ class RayleghTaylor:
             1.0/ufl.Max(2.0*sqrt(inner(self.u_curr,self.u_curr)),4.0/self.Re/self.h/self.h)*\
             inner(self.u_curr,self.u_curr)*inner(self.u_curr, grad(l))*dx
         return r
+
 
     """Set weak formulations"""
     def set_weak_forms(self):
@@ -190,11 +197,11 @@ class RayleghTaylor:
                       (1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                       self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
         elif(self.reinit_type == 'Conservative'):
-            grad_n = project(self.phi_curr, self.V)
-            n = grad_n/sqrt(inner(grad_n,grad_n))
             F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx\
-               - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))*inner(n, grad(self.l))*dx\
-               + self.eps_reinit*inner(n, grad((0.5*(self.phi + self.phi0))))*inner(n, grad(self.l))*dx
+               - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))* \
+                 inner(self.n, grad(self.l))*dx \
+               + self.eps_reinit*inner(self.n, grad((0.5*(self.phi + self.phi0))))* \
+                 inner(self.n, grad(self.l))*dx
             self.a3 = lhs(F3)
             self.L3 = rhs(F3)
 
@@ -234,9 +241,12 @@ class RayleghTaylor:
 
     """Build the system for Level set reinitialization"""
     def Levelset_reinit(self):
-        E_old = 1e10
+        #Assign current solution and current normal vector to the interface
         self.phi0.assign(self.phi_curr)
+        self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
+        E_old = 1e10
         for n in range(10):
             #Solve the system
             solve(self.a3 == self.L3, self.phi_intermediate, [])
@@ -253,8 +263,11 @@ class RayleghTaylor:
             #Set previous step solution
             self.phi0.assign(self.phi_intermediate)
 
-        #Assign the reinitialized level-set to the current solution
+        #Assign the reinitialized level-set to the current solution and
+        #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
+        self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
     """Execute simulation"""
@@ -286,7 +299,7 @@ class RayleghTaylor:
             print("Solving Level-set")
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
-            print(self.phi_curr.vector().get_local())
+            #print(self.phi_curr.vector().get_local())
 
             #Apply reinitialization for level-set
             try:
@@ -300,7 +313,7 @@ class RayleghTaylor:
             #Plot level-set solution
             plot(self.phi_curr, interactive = True)
 
-            #Prepare to next step
+            #Prepare to next step assign previous-step solution
             self.w_old.assign(self.w_curr)
             (self.u_old, self.p_old) = self.w_old.split()
             self.phi_old.assign(self.phi_curr)
