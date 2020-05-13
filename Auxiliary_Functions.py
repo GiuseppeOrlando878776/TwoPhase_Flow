@@ -10,6 +10,7 @@ def D(u):
 def mgrad(b):
     return(sqrt(b.dx(0)**2 + b.dx(1)**2))
 
+
 """Approximate sign function"""
 def signp(l, eps):
     return l/sqrt(l*l + eps*eps*mgrad(l)*mgrad(l))
@@ -18,7 +19,6 @@ def signp(l, eps):
 def CHeaviside(psi, eps):
     val = 0.5*(1.0 + psi/eps + 1/np.pi*sin(np.pi*psi/eps))
     return conditional(lt(abs(val),eps), val, (ufl.sign(psi) + 1)/2.0)
-
 
 """'Continuous Dirac's delta approximation'"""
 def CDelta(psi, eps):

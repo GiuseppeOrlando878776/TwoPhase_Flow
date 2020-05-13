@@ -77,14 +77,15 @@ class RayleghTaylor:
     """Build the mesh for the simulation"""
     def build_mesh(self):
         #Generate mesh
-        n_points = int(self.Param["Number_vertices"])
+        n_points = self.Param["Number_vertices"]
         self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.base, self.height), \
                                   n_points, n_points)
 
-        #Prepare useful variables for Interior Penalty
-        self.n_mesh = FacetNormal(self.mesh)
-        self.h      = CellDiameter(self.mesh)
-        self.h_avg  = (self.h('+') + self.h('-'))/2.0
+        #Prepare useful variables for stabilization
+        self.h = CellDiameter(self.mesh)
+        if(self.stab_method == 'IP'):
+            self.n_mesh = FacetNormal(self.mesh)
+            self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
         #Parameter for interface thickness
         self.eps = 1.0e-4
@@ -130,7 +131,7 @@ class RayleghTaylor:
 
         #Define function for normal to the interface
         self.grad_phi = Function(self.Q2)
-        self.n = Function(self.Q2)
+        #self.n = Function(self.Q2)
 
 
     """Set the proper initial condition"""
@@ -154,9 +155,19 @@ class RayleghTaylor:
         self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
 
-        #Compute normal vector to the surface
+        #Compute normal vector to the interface
         self.grad_phi = project(grad(self.phi_old), self.Q2)
         self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+
+
+    """Auxiliary function to compute density"""
+    def rho(self, x, eps):
+        return self.rho1*(1.0 - CHeaviside(x,eps)) + self.rho2*CHeaviside(x,eps)
+
+
+    """Auxiliary function to compute viscosity"""
+    def mu(self, x, eps):
+        return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
 
 
     """Interior penalty method"""
@@ -225,16 +236,6 @@ class RayleghTaylor:
     """Assemble boundary condition"""
     def assembleBC(self):
         self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
-
-
-    """Auxiliary function to compute density"""
-    def rho(self, x, eps):
-        return self.rho1*(1.0 - CHeaviside(x,eps)) + self.rho2*CHeaviside(x,eps)
-
-
-    """Auxiliary function to compute viscosity"""
-    def mu(self, x, eps):
-        return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
 
 
     """Build the system for Navier-Stokes simulation"""
