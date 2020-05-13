@@ -21,12 +21,13 @@ class RayleghTaylor:
         try:
             self.Re            = float(self.Param["Reynolds_number"])
             self.At            = float(self.Param["Atwood_number"])
-            self.surf_coeff    = float(self.Param["Surface_tension"])
+            self.Bo            = float(self.Param["Bond_number"])
             self.rho1          = float(self.Param["Lighter_density"])
             self.dt            = float(self.Param["Time_step"])
             self.t_end         = float(self.Param["End_time"])
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
+            exit(1)
 
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
@@ -55,6 +56,7 @@ class RayleghTaylor:
             self.height = float(self.Param["Height"])
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
+            exit(1)
 
         #Compute heavier density
         self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
@@ -142,6 +144,7 @@ class RayleghTaylor:
             radius = float(self.Param["Radius"])
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
+            exit(1)
 
         #Set initial condition of bubble and check geoemtric limits
         f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))-r",
@@ -188,13 +191,13 @@ class RayleghTaylor:
     """Set weak formulations"""
     def set_weak_forms(self):
         #Define variational problem for step 1 (Navier-Stokes)
-        F1 = self.rho(self.phi_old,self.eps)*(inner((self.u - self.u_old) / self.DT, self.v) + \
-                                          inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-           + 2.0/self.Re*self.mu(self.phi_old,self.eps)*inner(D(self.u), grad(self.v))*dx\
-           - 1.0/self.Re*self.p*div(self.v)*dx\
-           + div(self.u)*self.q*dx\
-          # + 1.0/self.At*inner(self.rho_old*self.g*self.e2, self.v)*dx\
-          # - 1.0/self.Re*inner(self.surf_coeff*div(self.n)*self.n*CDelta(self.phi_old, 1e-4), self.v)*dx(domain=self.mesh)
+        F1 = self.rho(self.phi_old,self.eps)*(inner((self.u - self.u_old)/self.DT, self.v) + \
+                                              inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
+           + 2.0/self.Re*self.mu(self.phi_old,self.eps)*inner(D(self.u), grad(self.v))*dx \
+           - 1.0/self.Re*self.p*div(self.v)*dx \
+           + div(self.u)*self.q*dx \
+           + 1.0/self.At*self.rho(self.phi_old,self.eps)*inner(self.e2, self.v)*dx \
+           + 1.0/(self.At*self.Bo)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -204,7 +207,7 @@ class RayleghTaylor:
         self.b1 = Vector()
 
         #Define variational problem for step 2 (Level-set)
-        F2 = (self.phi - self.phi_old) / self.DT * self.l*dx \
+        F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
            + inner(self.u_curr, grad(self.phi))*self.l*dx
 
         F2 += self.switcher_stab[self.stab_method](self.phi, self.l)
@@ -224,7 +227,7 @@ class RayleghTaylor:
                       (1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                       self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
         elif(self.reinit_method == 'Conservative'):
-            F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx\
+            F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx \
                - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))* \
                  inner(self.n, grad(self.l))*dx \
                + self.eps_reinit*inner(self.n, grad((0.5*(self.phi + self.phi0))))* \

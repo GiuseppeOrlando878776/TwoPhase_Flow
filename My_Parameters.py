@@ -27,7 +27,7 @@ class My_Parameters:
             f = open(param_name, "w")
             f.write("Reynolds_number = 1000\n")
             f.write("Atwood_number = 0.5\n")
-            f.write("Surface_tension = 1.0\n")
+            f.write("Bond_number = 1.0\n")
             f.write("Lighter_density = 1.0\n")
             f.write("Time_step = 0.1\n")
             f.write("End_time = 2.0\n")
