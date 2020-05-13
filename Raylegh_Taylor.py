@@ -49,13 +49,20 @@ class RayleghTaylor:
         assert self.reinit_method in ['Conservative','Non_Conservative'], \
                "Reinitialization method not available"
 
+        #Save computational box extrema
+        try:
+            self.base   = float(self.Param["Base"])
+            self.height = float(self.Param["Height"])
+        except RuntimeError as e:
+            print(str(e) +  "\nPlease check configuration file")
+
         #Compute heavier density
         self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
 
         #Compute viscosity: the 'lighter' viscosity will be computed by
         #Reynolds number, while for the 'heavier' we choose to impose a constant
         #density-viscosity ratio (arbitrary choice)
-        self.mu1 = self.rho1*np.sqrt(9.81*self.At)/self.Re
+        self.mu1 = self.rho1*np.sqrt(9.81*self.At*self.base)*self.base/self.Re
         self.mu2 = self.rho2*self.mu1/self.rho1
 
         #Convert useful constants to constant FENICS function
@@ -70,13 +77,9 @@ class RayleghTaylor:
     """Build the mesh for the simulation"""
     def build_mesh(self):
         #Generate mesh
-        try:
-            n_points = int(self.Param["Number_vertices"])
-            self.mesh = RectangleMesh(Point(0.0, 0.0), \
-                                      Point(float(self.Param["Base"]), float(self.Param["Height"])), \
-                                      n_points, n_points)
-        except RuntimeError as e:
-            print(str(e) +  "\nPlease check configuration file")
+        n_points = int(self.Param["Number_vertices"])
+        self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.base, self.height), \
+                                  n_points, n_points)
 
         #Prepare useful variables for Interior Penalty
         self.n_mesh = FacetNormal(self.mesh)
@@ -142,8 +145,8 @@ class RayleghTaylor:
         #Set initial condition of bubble and check geoemtric limits
         f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))-r",
                         A = center[0], B = center[1], r = radius, degree = 2)
-        assert center[0] - radius > 0.0 and center[0] + radius < float(self.Param["Base"]) and \
-               center[1] - radius > 0.0 and center[1] + radius < float(self.Param["Height"]),\
+        assert center[0] - radius > 0.0 and center[0] + radius < self.base and \
+               center[1] - radius > 0.0 and center[1] + radius < self.height,\
                 "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
