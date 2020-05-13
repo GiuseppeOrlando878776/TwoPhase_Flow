@@ -109,11 +109,11 @@ class RayleghTaylor:
         Qelem        = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
         Phielem      = FiniteElement("Lagrange", self.mesh.ufl_cell(), 2)
         Grad_Phielem = VectorElement("Lagrange", self.mesh.ufl_cell(), 1)
-        
+
         self.W  = FunctionSpace(self.mesh, Velem*Qelem)
         self.Q  = FunctionSpace(self.mesh, Phielem)
         self.Q2 = FunctionSpace(self.mesh, Grad_Phielem)
-                
+
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
         self.phi         = TrialFunction(self.Q)
@@ -192,13 +192,14 @@ class RayleghTaylor:
     """Set weak formulations"""
     def set_weak_forms(self):
         #Define variational problem for step 1 (Navier-Stokes)
-        F1 = self.rho(self.phi_old,self.eps)*(inner((self.u - self.u_old)/self.DT, self.v) + \
+        F1 = self.Re*self.At*self.Bo* \
+             self.rho(self.phi_old,self.eps)*(inner((self.u - self.u_old)/self.DT, self.v) + \
                                               inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-           + 2.0/self.Re*self.mu(self.phi_old,self.eps)*inner(D(self.u), grad(self.v))*dx \
-           - 1.0/self.Re*self.p*div(self.v)*dx \
-           + div(self.u)*self.q*dx \
-           + 1.0/self.At*self.rho(self.phi_old,self.eps)*inner(self.e2, self.v)*dx \
-           + 1.0/(self.At*self.Bo)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+           + 2.0*self.At*self.Bo*self.mu(self.phi_old,self.eps)*inner(D(self.u), grad(self.v))*dx \
+           - self.At*self.Bo*self.p*div(self.v)*dx \
+           + self.Re*self.At*self.Bo*div(self.u)*self.q*dx \
+           + self.Re*self.Bo*self.rho(self.phi_old,self.eps)*inner(self.e2, self.v)*dx \
+           + self.Re*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -298,7 +299,7 @@ class RayleghTaylor:
 
         #Set the initial condition
         self.set_initial_condition()
-        
+
         #Set weak formulations
         self.set_weak_forms()
 
