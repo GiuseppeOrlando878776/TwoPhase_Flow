@@ -3,6 +3,7 @@ from Auxiliary_Functions import *
 from Boundary_Conditions import WallBoundary
 
 from sys import exit
+import matplotlib.pyplot as plt
 
 class RayleghTaylor:
     """Class constructor"""
@@ -90,7 +91,7 @@ class RayleghTaylor:
             self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
         #Parameter for interface thickness
-        self.eps = 1.0e-4
+        self.eps = 1.0e-8
         self.alpha = Constant(0.1) #Penalty parameter
 
         #Parameters for reinitialization steps
@@ -316,6 +317,7 @@ class RayleghTaylor:
             self.assemble_NS_system()
             solve(self.A1, self.w_curr.vector(), self.b1)
             (self.u_curr, self.p_curr) = self.w_curr.split()
+            #print(self.u_curr.vector().get_local)
             end()
 
             #Solve level-set
@@ -336,7 +338,21 @@ class RayleghTaylor:
                 exit(1)
 
             #Plot level-set solution
-            plot(self.phi_curr, interactive = True)
+            tmp = Function(self.Q)
+            phi_curr_vec = self.phi_curr.vector().get_local()
+            a = np.empty_like(phi_curr_vec)
+            for i in range(len(phi_curr_vec)):
+                if(phi_curr_vec[i] < 0.0):
+                    a[i] = 1.0
+                else:
+                    a[i] = 0.0
+            tmp.vector().set_local(a)
+            print(tmp.vector().get_local())
+            tmp1 = interpolate(conditional(lt(self.phi_curr,0.0),1.0,0.0), self.Q)
+            print(tmp1.vector().get_local())
+            fig = plot(tmp, interactive = True, scalarbar = True)
+            plt.colorbar(fig)
+            plt.show()
 
             #Check volume consistency
             Vol = assemble(conditional(lt(self.phi_curr,0.0),1.0,0.0)*dx)
