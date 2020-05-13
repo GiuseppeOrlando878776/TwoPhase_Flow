@@ -69,7 +69,7 @@ class RayleghTaylor:
 
         #Convert useful constants to constant FENICS function
         self.DT = Constant(self.dt)
-        self.g  = Constant(9.81)
+       #self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
 
         #Set parameter for standard output
@@ -109,10 +109,11 @@ class RayleghTaylor:
         Qelem        = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
         Phielem      = FiniteElement("Lagrange", self.mesh.ufl_cell(), 2)
         Grad_Phielem = VectorElement("Lagrange", self.mesh.ufl_cell(), 1)
+        
         self.W  = FunctionSpace(self.mesh, Velem*Qelem)
         self.Q  = FunctionSpace(self.mesh, Phielem)
         self.Q2 = FunctionSpace(self.mesh, Grad_Phielem)
-
+                
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
         self.phi         = TrialFunction(self.Q)
@@ -267,7 +268,7 @@ class RayleghTaylor:
         self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
         E_old = 1e10
-        for n in range(10):
+        for n in range(5):
             #Solve the system
             solve(self.a3 == self.L3, self.phi_intermediate, [])
 
@@ -297,7 +298,7 @@ class RayleghTaylor:
 
         #Set the initial condition
         self.set_initial_condition()
-
+        
         #Set weak formulations
         self.set_weak_forms()
 
@@ -321,7 +322,7 @@ class RayleghTaylor:
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
             end()
-            #print(self.phi_curr.vector().get_local())
+           #print(self.phi_curr.vector().get_local())
 
             #Apply reinitialization for level-set
             try:
@@ -335,6 +336,11 @@ class RayleghTaylor:
 
             #Plot level-set solution
             plot(self.phi_curr, interactive = True)
+
+            #Check volume consistency
+            Vol = assemble(conditional(lt(self.phi_curr,0.0),1.0,0.0)*dx)
+            begin(int(LogLevel.INFO) + 1,"Volume = " + str(Vol))
+            end()
 
             end()
 
