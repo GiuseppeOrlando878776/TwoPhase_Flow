@@ -72,7 +72,6 @@ class BubbleMove:
 
         #Convert useful constants to constant FENICS function
         self.DT = Constant(self.dt)
-       #self.g  = Constant(9.81)
         self.e2 = Constant((0.0,1.0))
 
         #Set parameter for standard output
@@ -101,15 +100,15 @@ class BubbleMove:
         if(self.reinit_method == 'Non_Conservative'):
             self.eps_reinit = Constant(hmin)
             self.alpha_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(0.0001) #We choose an explicit treatment to maintain the linearity
-                                              #and so a very small step is needed
+            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                    #and so a very small step is needed
         elif(self.reinit_method == 'Conservative'):
             self.dt_reinit = Constant(0.5*hmin**(1.1))
             self.eps_reinit = Constant(0.5*hmin**(0.9))
 
         #Define function spaces
         Velem        = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
-        Qelem        = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
+        Qelem        = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
         Phielem      = FiniteElement("Lagrange", self.mesh.ufl_cell(), 2)
         Grad_Phielem = VectorElement("Lagrange", self.mesh.ufl_cell(), 1)
 
@@ -137,7 +136,6 @@ class BubbleMove:
 
         #Define function for normal to the interface
         self.grad_phi = Function(self.Q2)
-        #self.n = Function(self.Q2)
 
 
     """Set the proper initial condition"""
@@ -308,10 +306,7 @@ class BubbleMove:
 
         #Construct vector of ones inside the bubble
         for i in range(len(self.phi_curr_vec)):
-            if(self.phi_curr_vec[i] < 0.0):
-                self.lev_set[i] = 1.0
-            else:
-                self.lev_set[i] = 0.0
+            self.lev_set[i] = 1.0*(self.phi_curr_vec[i] < 0.0)
 
         #Assign vector to FE function
         self.tmp.vector().set_local(self.lev_set)
@@ -358,8 +353,8 @@ class BubbleMove:
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
             self.assemble_Levelset_system()
             solve(self.A2, self.phi_curr.vector(), self.b2)
+            #print(self.phi_curr.vector().get_local())
             end()
-           #print(self.phi_curr.vector().get_local())
 
             #Apply reinitialization for level-set
             try:
