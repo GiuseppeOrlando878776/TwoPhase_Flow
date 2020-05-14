@@ -159,6 +159,8 @@ class BubbleMove:
         self.phi_old.assign(interpolate(f,self.Q))
         self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
+        self.rho_old = self.rho(self.phi_old,self.eps)
+        self.mu_old  = self.mu(self.phi_old,self.eps)
 
         #Compute normal vector to the interface
         self.grad_phi = project(grad(self.phi_old), self.Q2)
@@ -196,13 +198,13 @@ class BubbleMove:
 
     """Weak formulation for Navier-Stokes"""
     def NS_weak_form(self):
-        F1 = self.Re*self.At*self.Bo* \
-             self.rho(self.phi_old,self.eps)*(inner((self.u - self.u_old)/self.DT, self.v) + \
-                                              inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-           + 2.0*self.At*self.Bo*self.mu(self.phi_old,self.eps)*inner(D(self.u), grad(self.v))*dx \
+        F1 = self.Re*self.At*self.Bo*self.rho_old* \
+             (inner((self.u - self.u_old)/self.DT, self.v) + \
+              inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
+           + 2.0*self.At*self.Bo*self.mu_old*inner(D(self.u), grad(self.v))*dx \
            - self.At*self.Bo*self.p*div(self.v)*dx \
            + self.Re*self.At*self.Bo*div(self.u)*self.q*dx \
-           + self.Re*self.Bo*self.rho(self.phi_old,self.eps)*inner(self.e2, self.v)*dx \
+           + self.Re*self.Bo*self.rho_old*inner(self.e2, self.v)*dx \
            + self.Re*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -230,10 +232,11 @@ class BubbleMove:
 
     """Weak form non conservative reinitialization"""
     def NCLSM_weak_form(self):
+        self.approx_sign = signp(self.phi_curr, self.eps_reinit)
+
         self.a3 = self.phi/self.dt_reinit*self.l*dx
         self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
-                  signp(self.phi_curr, self.eps_reinit)*\
-                  (1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
+                  self.approx_sign*(1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                   self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
 
 
@@ -291,7 +294,9 @@ class BubbleMove:
         #Assign current solution and current normal vector to the interface
         #in case of conservative simulation
         self.phi0.assign(self.phi_curr)
-        if(self.reinit_method == 'Conservative'):
+        if(self.reinit_method == 'Non_Conservative'):
+            self.approx_sign = signp(self.phi_curr, self.eps_reinit)
+        elif(self.reinit_method == 'Conservative'):
             self.grad_phi = project(grad(self.phi_curr), self.Q2)
             self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
@@ -396,5 +401,7 @@ class BubbleMove:
             self.w_old.assign(self.w_curr)
             (self.u_old, self.p_old) = self.w_old.split()
             self.phi_old.assign(self.phi_curr)
+            self.rho_old = self.rho(self.phi_old,self.eps)
+            self.mu_old = self.mu(self.phi_old,self.eps)
 
             t = t + self.dt if t + self.dt <= self.t_end or abs(t - self.t_end) < DOLFIN_EPS else self.t_end
