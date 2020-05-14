@@ -215,6 +215,46 @@ class BubbleMove:
         self.b1 = Vector()
 
 
+    """Weak formulation step 1 ICT(Incremental Chorin-Temam)"""
+    def Step1_ICT_weak_form(self):
+        #Define intermediate function
+        self.U_12 = 0.5*(self.u + self.u_old)
+
+        F1 = self.Re*self.At*self.Bo*self.rho_old* \
+             (inner((self.u - self.u_old)/seld.DT, self.v) + \
+              inner(dot(self.u_old, nabla_grad(self.u_old)), self.v))*dx \
+            + 2.0*self.At*self.Bo*self.mu_old*inner(D(self.U_12), grad(self.v))*dx \
+            + self.Re*self.Bo*self.rho_old*inner(self.e2, self.v)*dx \
+            + self.Re*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+
+        #Save corresponding weak form and declare suitable matrix and vector
+        self.a1 = lhs(F1)
+        self.L1 = rhs(F1)
+
+        self.A1 = Matrix()
+        self.b1 = Vector()
+
+
+    """Weak formulation step 2 ICT(Incremental Chorin-Temam)"""
+    def Step2_ICT_weak_form(self):
+        self.a1_bis = inner(grad(self.p), grad(self.q))*dx
+        self.L1_bis = inner(grad(self.p_old), grad(self.q))*dx - \
+                      (1.0/self.DT)*div(self.u_curr)*self.q*dx
+
+        self.A1_bis = Matrix()
+        self.b1_bis = Vector()
+
+
+    """Weak formulation step 2 ICT(Incremental Chorin-Temam)"""
+    def Step3_ICT_weak_form(self):
+        self.a1_tris = inner(self.u, self.v)*dx
+        self.L1_tris = inner(self.u_curr, self.v)*dx - \
+                       self.DT*inner(grad(self.p_curr - self.p_old), self.v)*dx
+
+        self.A1_tris = Matrix()
+        self.b1_tris = Vector()
+
+
     """Level-set weak formulation"""
     def LS_weak_form(self):
         F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
@@ -280,6 +320,16 @@ class BubbleMove:
         # Apply boundary conditions
         self.bcs.apply(self.A1)
         self.bcs.apply(self.b1)
+
+        # Assemble matrices and right-hand sides
+        #assemble(self.a1, tensor = self.A1)
+        #assemble(self.L1, tensor = self.b1)
+        #self.bcs.apply(self.A1)
+        #self.bcs.apply(self.b1)
+        #assemble(self.a1_bis, tensor = self.A1_bis)
+        #assemble(self.L1_bis, tensor = self.b1_bis)
+        #assemble(self.a1_tris, tensor = self.A1_tris)
+        #assemble(self.L1_tris, tensor = self.b1_tris)
 
 
     """Build the system for Level set simulation"""
