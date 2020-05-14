@@ -134,7 +134,7 @@ class RayleghTaylor:
                                                  #reinitialization and it is also useful for clearness
 
         #Define function for normal to the interface
-        self.grad_phi = Function(self.Q2)
+        #self.grad_phi = Function(self.Q2)
         #self.n = Function(self.Q2)
 
 
@@ -161,8 +161,8 @@ class RayleghTaylor:
         (self.u_old, self.p_old) = self.w_old.split()
 
         #Compute normal vector to the interface
-        self.grad_phi = project(grad(self.phi_old), self.Q2)
-        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        #self.grad_phi = project(grad(self.phi_old), self.Q2)
+        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
         #Define function and vector for plotting level-set and computing volume
         self.tmp = Function(self.Q)
@@ -204,7 +204,9 @@ class RayleghTaylor:
            - self.At*self.Bo*self.p*div(self.v)*dx \
            + self.Re*self.At*self.Bo*div(self.u)*self.q*dx \
            + self.Re*self.Bo*self.rho(self.phi_old,self.eps)*inner(self.e2, self.v)*dx \
-           + self.Re*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+           + self.Re*div(grad(self.phi_old)/sqrt(inner(grad(self.phi_old),grad(self.phi_old))))* \
+                     inner(grad(self.phi_old)/sqrt(inner(grad(self.phi_old),grad(self.phi_old))), self.v)* \
+                     CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -236,9 +238,9 @@ class RayleghTaylor:
         elif(self.reinit_method == 'Conservative'):
             F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx \
                - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))* \
-                 inner(self.n, grad(self.l))*dx \
+                 inner(grad(self.phi_curr)/sqrt(inner(grad(self.phi_curr),grad(self.phi_curr))), grad(self.l))*dx \
                + self.eps_reinit*inner(self.n, grad((0.5*(self.phi + self.phi0))))* \
-                 inner(self.n, grad(self.l))*dx
+                 inner(grad(self.phi_curr)/sqrt(inner(grad(self.phi_curr),grad(self.phi_curr))), grad(self.l))*dx
             self.a3 = lhs(F3)
             self.L3 = rhs(F3)
 
@@ -270,8 +272,8 @@ class RayleghTaylor:
     def Levelset_reinit(self):
         #Assign current solution and current normal vector to the interface
         self.phi0.assign(self.phi_curr)
-        self.grad_phi = project(grad(self.phi_curr), self.Q2)
-        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        #self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
         E_old = 1e10
         for n in range(5):
@@ -293,8 +295,8 @@ class RayleghTaylor:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        self.grad_phi = project(grad(self.phi_curr), self.Q2)
-        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        #self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
     """Plot the level-set function and compute the volume"""
