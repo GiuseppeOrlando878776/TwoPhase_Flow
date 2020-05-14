@@ -194,9 +194,8 @@ class BubbleMove:
         return r
 
 
-    """Set weak formulations"""
-    def set_weak_forms(self):
-        #Define variational problem for step 1 (Navier-Stokes)
+    """Weak formulation for Navier-Stokes"""
+    def NS_weak_form(self):
         F1 = self.Re*self.At*self.Bo* \
              self.rho(self.phi_old,self.eps)*(inner((self.u - self.u_old)/self.DT, self.v) + \
                                               inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
@@ -213,7 +212,9 @@ class BubbleMove:
         self.A1 = Matrix()
         self.b1 = Vector()
 
-        #Define variational problem for step 2 (Level-set)
+
+    """Level-set weak formulation"""
+    def LS_weak_form(self):
         F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
            + inner(self.u_curr, grad(self.phi))*self.l*dx
 
@@ -226,21 +227,40 @@ class BubbleMove:
         self.A2 = Matrix()
         self.b2 = Vector()
 
+
+    """Weak form non conservative reinitialization"""
+    def NCLSM_weak_form(self):
+        self.a3 = self.phi/self.dt_reinit*self.l*dx
+        self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
+                  signp(self.phi_curr, self.eps_reinit)*\
+                  (1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
+                  self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
+
+
+    """Weak form conservative reinitialization"""
+    def CLSM_weak_form(self):
+        F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx \
+           - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))* \
+             inner(self.n, grad(self.l))*dx \
+           + self.eps_reinit*inner(self.n, grad((0.5*(self.phi + self.phi0))))* \
+             inner(self.n, grad(self.l))*dx
+        self.a3 = lhs(F3)
+        self.L3 = rhs(F3)
+
+
+    """Set weak formulations"""
+    def set_weak_forms(self):
+        #Set variational problem for step 1 (Navier-Stokes)
+        self.NS_weak_form()
+
+        #Set variational problem for step 2 (Level-set)
+        self.LS_weak_form()
+
         #Set weak form for level-set reinitialization
         if(self.reinit_method == 'Non_Conservative'):
-            self.a3 = self.phi/self.dt_reinit*self.l*dx
-            self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
-                      signp(self.phi_curr, self.eps_reinit)*\
-                      (1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
-                      self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
+            self.NCLSM_weak_form()
         elif(self.reinit_method == 'Conservative'):
-            F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx \
-               - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))* \
-                 inner(self.n, grad(self.l))*dx \
-               + self.eps_reinit*inner(self.n, grad((0.5*(self.phi + self.phi0))))* \
-                 inner(self.n, grad(self.l))*dx
-            self.a3 = lhs(F3)
-            self.L3 = rhs(F3)
+            self.CLSM_weak_form()
 
 
     """Assemble boundary condition"""
