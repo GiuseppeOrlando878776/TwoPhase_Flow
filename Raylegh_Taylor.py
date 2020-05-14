@@ -164,6 +164,10 @@ class RayleghTaylor:
         self.grad_phi = project(grad(self.phi_old), self.Q2)
         self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
+        #Define function and vector for plotting level-set and computing volume
+        self.tmp = Function(self.Q)
+        self.lev_set = np.empty_like(self.phi_old.vector().get_local())
+
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
@@ -293,6 +297,32 @@ class RayleghTaylor:
         self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
+    """Plot the level-set function and compute the volume"""
+    def plot_and_volume(self):
+        #Extract vector for FE function
+        self.phi_curr_vec = self.phi_curr.vector().get_local()
+
+        #Construct vector of ones inside the bubble
+        for i in range(len(self.phi_curr_vec)):
+            if(self.phi_curr_vec[i] < 0.0):
+                self.lev_set[i] = 1.0
+            else:
+                self.lev_set[i] = 0.0
+
+        #Assign vector to FE function
+        self.tmp.vector().set_local(self.lev_set)
+
+        #Plot the function just computed
+        fig = plot(self.tmp, interactive = True, scalarbar = True)
+        plt.colorbar(fig)
+        plt.show()
+
+        #Check volume consistency
+        Vol = assemble(self.tmp*dx)
+        begin(int(LogLevel.INFO) + 1,"Volume = " + str(Vol))
+        end()
+
+
     """Execute simulation"""
     def run(self):
         #Build the mesh
@@ -337,26 +367,8 @@ class RayleghTaylor:
                 print("Aborting simulation...")
                 exit(1)
 
-            #Plot level-set solution
-            tmp = Function(self.Q)
-            phi_curr_vec = self.phi_curr.vector().get_local()
-            a = np.empty_like(phi_curr_vec)
-            for i in range(len(phi_curr_vec)):
-                if(phi_curr_vec[i] < 0.0):
-                    a[i] = 1.0
-                else:
-                    a[i] = 0.0
-            tmp.vector().set_local(a)
-            print(tmp.vector().get_local())
-            tmp1 = interpolate(conditional(lt(self.phi_curr,0.0),1.0,0.0), self.Q)
-            print(tmp1.vector().get_local())
-            fig = plot(tmp, interactive = True, scalarbar = True)
-            plt.colorbar(fig)
-            plt.show()
-
-            #Check volume consistency
-            Vol = assemble(conditional(lt(self.phi_curr,0.0),1.0,0.0)*dx)
-            begin(int(LogLevel.INFO) + 1,"Volume = " + str(Vol))
+            begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
+            self.plot_and_volume()
             end()
 
             end()
