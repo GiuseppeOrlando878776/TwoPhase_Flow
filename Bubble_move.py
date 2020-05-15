@@ -49,7 +49,7 @@ class BubbleMove:
                   " declared but not implemented")
             exit(1)
         assert self.NS_sol_method in self.switcher_NS, \
-               "Solution method for NAvier-Stokes not available"
+               "Solution method for Navier-Stokes not available"
 
         #Define an auxiliary dictionary to set proper stabilization
         try:
@@ -120,33 +120,25 @@ class BubbleMove:
 
         #Define function spaces
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
-        Qelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
+        Pelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
 
-        #Define space, trial and test function and suitable functions for NS
-        if(self.NS_sol_method == 'Standard'):
-            self.W = FunctionSpace(self.mesh, Velem*Qelem)
-            (self.u, self.p) = TrialFunctions(self.W)
-            (self.v, self.q) = TestFunctions(self.W)
-            self.w_old  = Function(self.W)
-            self.w_curr = Function(self.W)
-            (self.u_curr, self.p_curr) = self.w_curr.split()
-        elif(self.NS_sol_method == 'ICT'):
-            self.V = FunctionSpace(self.mesh, Velem)
-            self.P = FunctionSpace(self.mesh, Qelem)
-            self.u = TrialFunction(self.V)
-            self.p = TrialFunction(self.P)
-            self.v = TestFunction(self.V)
-            self.q = TestFunction(self.P)
-            self.u_old = Function(self.V)
-            self.p_old = Function(self.P)
-            self.u_curr = Function(self.V)
-            self.p_curr = Function(self.P)
-
-        #Define space, trial and test function and suitable functions for Level-set
+        #Define FE spaces, trial and test function and suitable functions for NS
+        self.W = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+
+        #Define trial and test functions
+        (self.u, self.p) = TrialFunctions(self.W)
+        (self.v, self.q) = TestFunctions(self.W)
         self.phi = TrialFunction(self.Q)
         self.l   = TestFunction(self.Q)
+
+        #Define functions to store solution
+        self.w_old  = Function(self.W)
+        self.w_curr = Function(self.W)
+        (self.u_curr, self.p_curr) = self.w_curr.split()
+        if(self.NS_sol_method == 'ICT'):
+            self.assigner = FunctionAssigner(self.W, [self.W.sub(0), self.W.sub(1)])
         self.phi_old  = Function(self.Q)
         self.phi_curr = Function(self.Q)
 
@@ -178,12 +170,8 @@ class BubbleMove:
 
         #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        if(self.NS_sol_method == 'Standard'):
-            self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
-            (self.u_old, self.p_old) = self.w_old.split()
-        elif(self.NS_sol_method == 'ICT'):
-            self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
-            self.p_old.assign(interpolate(Constant(0.0),self.P))
+        self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
+        (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old,self.eps)
         self.mu_old  = self.mu(self.phi_old,self.eps)
 
@@ -338,10 +326,7 @@ class BubbleMove:
 
     """Assemble boundary condition"""
     def assembleBC(self):
-        if(self.NS_sol_method == 'Standard'):
-            self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
-        elif(self.NS_sol_method == 'ICT'):
-            self.bcs = DirichletBC(self.V, Constant((0.0,0.0)), WallBoundary())
+        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
 
 
     """Build and solve the system for Navier-Stokes simulation"""
@@ -383,6 +368,8 @@ class BubbleMove:
 
         #Solve the projection step
         solve(self.A1_tris, self.u_curr.vector(), self.b1_tris)
+
+        self.assigner.assign(self.w_curr, [self.u_curr, self.p_curr])
 
 
     """Build the system for Level set simulation"""
@@ -477,7 +464,7 @@ class BubbleMove:
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
             self.switcher_NS[self.NS_sol_method]()
-            #print(self.u_curr.vector().get_local)
+            #print(self.u_curr.vector().get_local())
             end()
 
             #Solve level-set
@@ -503,11 +490,7 @@ class BubbleMove:
             end()
 
             #Prepare to next step assign previous-step solution
-            if(self.NS_sol_method == 'Standard'):
-                self.w_old.assign(self.w_curr)
-            elif(self.NS_sol_method == 'ICT'):
-                self.u_old.assign(self.u_curr)
-                self.p_old.assign(self.p_curr)
+            self.w_old.assign(self.w_curr)
             self.phi_old.assign(self.phi_curr)
             self.rho_old = self.rho(self.phi_old,self.eps)
             self.mu_old = self.mu(self.phi_old,self.eps)
