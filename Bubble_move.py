@@ -82,6 +82,9 @@ class BubbleMove:
         self.mu1 = self.rho1*np.sqrt(9.81*self.At*self.base)*self.base/self.Re
         self.mu2 = self.rho2*self.mu1/self.rho1
 
+        #Set density (and viscosity) ratio
+        self.rho2_rho1 = self.rho2/self.rho1
+
         #Convert useful constants to constant FENICS function
         self.DT = Constant(self.dt)
         self.e2 = Constant((0.0,1.0))
@@ -169,7 +172,7 @@ class BubbleMove:
                 "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
-        self.phi_old.assign(interpolate(f,self.Q))
+        self.phi_old.assign(interpolate(f,self.Q)/self.base)
         self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old,self.eps)
@@ -186,12 +189,12 @@ class BubbleMove:
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return self.rho1*(1.0 - CHeaviside(x,eps)) + self.rho2*CHeaviside(x,eps)
+        return (1.0 - CHeaviside(x,eps)) + self.rho2_rho1*CHeaviside(x,eps)
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return self.mu1*(1.0 - CHeaviside(x,eps)) + self.mu2*CHeaviside(x,eps)
+        return (1.0 - CHeaviside(x,eps)) + self.rho2_rho1*CHeaviside(x,eps)
 
 
     """Interior penalty method"""
@@ -415,7 +418,7 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        self.grad_phi = project(self.base*grad(self.phi_curr), self.Q2)
         self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
