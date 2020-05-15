@@ -9,6 +9,7 @@ def main():
     param_handler = param_test.get_param()
     try:
         print(str(param_handler["Reynolds_number"]))
+        print(param_handler["Stabilization_Type"])
     except RuntimeError as e:
         print(str(e) +  "\nPlease check configuration file")
 

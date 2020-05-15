@@ -55,7 +55,7 @@ class BubbleMove:
 
         #Save computational box extrema
         try:
-            self.base   = float(self.Param["Base"])
+            self.base   = float(self.Param["Base"]) #This is also the reference length
             self.height = float(self.Param["Height"])
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
@@ -86,7 +86,7 @@ class BubbleMove:
                                   n_points, n_points)
 
         #Prepare useful variables for stabilization
-        self.h = CellDiameter(self.mesh)
+        self.h = CellDiameter(self.mesh)/self.base
         if(self.stab_method == 'IP'):
             self.n_mesh = FacetNormal(self.mesh)
             self.h_avg  = (self.h('+') + self.h('-'))/2.0
@@ -191,7 +191,7 @@ class BubbleMove:
     """SUPG method"""
     def SUPG(self, phi, l):
         r = ((phi - self.phi_old)/self.DT + inner(self.u_curr, grad(phi)))* \
-            1.0/ufl.Max(2.0*sqrt(inner(self.u_curr,self.u_curr)),4.0/self.Re/self.h/self.h)*\
+            self.alpha/ufl.Max(2.0*sqrt(inner(self.u_curr,self.u_curr)), 4.0/(self.Re*self.h*self.h))*\
             inner(self.u_curr,self.u_curr)*inner(self.u_curr, grad(l))*dx
         return r
 
@@ -351,7 +351,7 @@ class BubbleMove:
             self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
         E_old = 1e10
-        for n in range(5):
+        for n in range(10):
             #Solve the system
             solve(self.a3 == self.L3, self.phi_intermediate, [])
 
@@ -361,6 +361,8 @@ class BubbleMove:
 
             if(E_old < E):
                 raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
+            elif(E_old - E < 1e-3):
+                break
 
             E_old = E
 
