@@ -38,6 +38,18 @@ class BubbleMove:
         self.deg = self.Param["Polynomial_degree"]
         self.reinit_method = self.Param["Reinit_Type"]
         self.stab_method   = self.Param["Stabilization_Type"]
+        self.NS_sol_method = self.Param["NS_procedure"]
+
+        #Define an auxiliary dictionary to set proper stabilization
+        try:
+            self.switcher_NS = {'Standard':self.solve_Standard_NS_system, \
+                                'ICT':self.solve_ICT_NS_systems}
+        except NameError as e:
+            print("Solution procedure for solving Navier-Stokes " + str(e).split("'")[1] + \
+                  " declared but not implemented")
+            exit(1)
+        assert self.NS_sol_method in self.switcher_NS, \
+               "Solution method for NAvier-Stokes not available"
 
         #Define an auxiliary dictionary to set proper stabilization
         try:
@@ -109,12 +121,11 @@ class BubbleMove:
         #Define function spaces
         Velem        = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
         Qelem        = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
-        Phielem      = FiniteElement("Lagrange", self.mesh.ufl_cell(), 2)
-        Grad_Phielem = VectorElement("Lagrange", self.mesh.ufl_cell(), 1)
 
         self.W  = FunctionSpace(self.mesh, Velem*Qelem)
-        self.Q  = FunctionSpace(self.mesh, Phielem)
-        self.Q2 = FunctionSpace(self.mesh, Grad_Phielem)
+        self.assigner = FunctionAssigner(self.W, [self.W.sub(0),self.W.sub(1)])
+        self.Q  = FunctionSpace(self.mesh, "CG", 2)
+        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
@@ -126,7 +137,7 @@ class BubbleMove:
         self.w_old    = Function(self.W)
         self.phi_old  = Function(self.Q)
         self.w_curr   = Function(self.W)
-        (self.u_curr, self.p_curr) = self.w_curr.split()
+        (self.u_curr, self.p_curr) = self.w_curr.split(True)
         self.phi_curr = Function(self.Q)
 
         #Define function for reinitialization
@@ -191,7 +202,7 @@ class BubbleMove:
     """SUPG method"""
     def SUPG(self, phi, l):
         r = ((phi - self.phi_old)/self.DT + inner(self.u_curr, grad(phi)))* \
-            self.alpha/ufl.Max(2.0*sqrt(inner(self.u_curr,self.u_curr)), 4.0/(self.Re*self.h*self.h))*\
+            self.alpha*self.h/ufl.Max(2.0*sqrt(inner(self.u_curr,self.u_curr)), 4.0/(self.Re*self.h))*\
             inner(self.u_curr,self.u_curr)*inner(self.u_curr, grad(l))*dx
         return r
 
@@ -221,8 +232,8 @@ class BubbleMove:
         self.U_12 = 0.5*(self.u + self.u_old)
 
         F1 = self.Re*self.At*self.Bo*self.rho_old* \
-             (inner((self.u - self.u_old)/seld.DT, self.v) + \
-              inner(dot(self.u_old, nabla_grad(self.u_old)), self.v))*dx \
+             (inner((self.u - self.u_old)/self.DT, self.v) + \
+              inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
             + 2.0*self.At*self.Bo*self.mu_old*inner(D(self.U_12), grad(self.v))*dx \
             + self.Re*self.Bo*self.rho_old*inner(self.e2, self.v)*dx \
             + self.Re*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
@@ -245,7 +256,7 @@ class BubbleMove:
         self.b1_bis = Vector()
 
 
-    """Weak formulation step 2 ICT(Incremental Chorin-Temam)"""
+    """Weak formulation velocity projection ICT(Incremental Chorin-Temam)"""
     def Step3_ICT_weak_form(self):
         self.a1_tris = inner(self.u, self.v)*dx
         self.L1_tris = inner(self.u_curr, self.v)*dx - \
@@ -294,7 +305,12 @@ class BubbleMove:
     """Set weak formulations"""
     def set_weak_forms(self):
         #Set variational problem for step 1 (Navier-Stokes)
-        self.NS_weak_form()
+        if(self.NS_sol_method == 'Standard'):
+            self.NS_weak_form()
+        elif(self.NS_sol_method == 'ICT'):
+            self.Step1_ICT_weak_form()
+            self.Step2_ICT_weak_form()
+            self.Step3_ICT_weak_form()
 
         #Set variational problem for step 2 (Level-set)
         self.LS_weak_form()
@@ -311,8 +327,8 @@ class BubbleMove:
         self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
 
 
-    """Build the system for Navier-Stokes simulation"""
-    def assemble_NS_system(self):
+    """Build and solve the system for Navier-Stokes simulation"""
+    def solve_Standard_NS_system(self):
         # Assemble matrices and right-hand sides
         assemble(self.a1, tensor = self.A1)
         assemble(self.L1, tensor = self.b1)
@@ -321,22 +337,47 @@ class BubbleMove:
         self.bcs.apply(self.A1)
         self.bcs.apply(self.b1)
 
-        # Assemble matrices and right-hand sides
-        #assemble(self.a1, tensor = self.A1)
-        #assemble(self.L1, tensor = self.b1)
-        #self.bcs.apply(self.A1)
-        #self.bcs.apply(self.b1)
-        #assemble(self.a1_bis, tensor = self.A1_bis)
-        #assemble(self.L1_bis, tensor = self.b1_bis)
-        #assemble(self.a1_tris, tensor = self.A1_tris)
-        #assemble(self.L1_tris, tensor = self.b1_tris)
+        #Solve the system
+        solve(self.A1, self.w_curr.vector(), self.b1)
+        (self.u_curr, self.p_curr) = self.w_curr.split()
 
+
+    """Build the systems for Navier-Stokes solution through ICT"""
+    def solve_ICT_NS_systems(self):
+        #Assemble matrix and right-hand side for first step
+        assemble(self.a1, tensor = self.A1)
+        assemble(self.L1, tensor = self.b1)
+        self.bcs.apply(self.A1)
+        self.bcs.apply(self.b1)
+
+        #Solve the first step
+        solve(self.A1, self.u_curr.vector(), self.b1)
+
+        #Assemble matrix and right-hand side for second step
+        assemble(self.a1_bis, tensor = self.A1_bis)
+        assemble(self.L1_bis, tensor = self.b1_bis)
+
+        #Solve the second step
+        solve(self.A1_bis, self.p_curr.vector(), self.b1_bis)
+
+        #Assemble matrix and right-hand side for the velocity projection step
+        assemble(self.a1_tris, tensor = self.A1_tris)
+        assemble(self.L1_tris, tensor = self.b1_tris)
+
+        #Solve the projection step
+        solve(self.A1_tris, self.u_curr.vector(), self.b1_tris)
+
+        #Assign to the vector function space the found solution
+        self.assigner.assign(self.w_curr, [self.u_curr,self.p_curr])
 
     """Build the system for Level set simulation"""
-    def assemble_Levelset_system(self):
+    def solve_Levelset_system(self):
         # Assemble matrix and right-hand side
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
+
+        #Solve the level-set system
+        solve(self.A2, self.phi_curr.vector(), self.b2)
 
 
     """Build the system for Level set reinitialization"""
@@ -420,16 +461,13 @@ class BubbleMove:
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
-            self.assemble_NS_system()
-            solve(self.A1, self.w_curr.vector(), self.b1)
-            (self.u_curr, self.p_curr) = self.w_curr.split()
+            self.switcher_NS[self.NS_sol_method]()
             #print(self.u_curr.vector().get_local)
             end()
 
             #Solve level-set
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
-            self.assemble_Levelset_system()
-            solve(self.A2, self.phi_curr.vector(), self.b2)
+            self.solve_Levelset_system()
             #print(self.phi_curr.vector().get_local())
             end()
 
