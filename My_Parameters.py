@@ -19,7 +19,7 @@ class My_Parameters:
         self.Param.add("Stabilization_Type", 'IP')
         self.Param.add("Number_vertices", 64)
         self.Param.add("Log_Level", 21) #more than INFO level by default
-        self.Param.add("NS_procedure", 'Standard')
+        self.Param.add("NS_Procedure", 'Standard')
 
         try:
             self.file = open(param_name, "r")

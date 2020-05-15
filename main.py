@@ -10,6 +10,7 @@ def main():
     try:
         print(str(param_handler["Reynolds_number"]))
         print(param_handler["Stabilization_Type"])
+        print(param_handler["NS_Procedure"])
     except RuntimeError as e:
         print(str(e) +  "\nPlease check configuration file")
 

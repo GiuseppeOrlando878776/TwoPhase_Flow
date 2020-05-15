@@ -38,7 +38,7 @@ class BubbleMove:
         self.deg = self.Param["Polynomial_degree"]
         self.reinit_method = self.Param["Reinit_Type"]
         self.stab_method   = self.Param["Stabilization_Type"]
-        self.NS_sol_method = self.Param["NS_procedure"]
+        self.NS_sol_method = self.Param["NS_Procedure"]
 
         #Define an auxiliary dictionary to set proper stabilization
         try:
@@ -119,25 +119,35 @@ class BubbleMove:
             self.eps_reinit = Constant(0.5*hmin**(0.9))
 
         #Define function spaces
-        Velem        = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
-        Qelem        = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
+        Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
+        Qelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
 
-        self.W  = FunctionSpace(self.mesh, Velem*Qelem)
-        self.assigner = FunctionAssigner(self.W, [self.W.sub(0),self.W.sub(1)])
+        #Define space, trial and test function and suitable functions for NS
+        if(self.NS_sol_method == 'Standard'):
+            self.W = FunctionSpace(self.mesh, Velem*Qelem)
+            (self.u, self.p) = TrialFunctions(self.W)
+            (self.v, self.q) = TestFunctions(self.W)
+            self.w_old  = Function(self.W)
+            self.w_curr = Function(self.W)
+            (self.u_curr, self.p_curr) = self.w_curr.split()
+        elif(self.NS_sol_method == 'ICT'):
+            self.V = FunctionSpace(self.mesh, Velem)
+            self.P = FunctionSpace(self.mesh, Qelem)
+            self.u = TrialFunction(self.V)
+            self.p = TrialFunction(self.P)
+            self.v = TestFunction(self.V)
+            self.q = TestFunction(self.P)
+            self.u_old = Function(self.V)
+            self.p_old = Function(self.P)
+            self.u_curr = Function(self.V)
+            self.p_curr = Function(self.P)
+
+        #Define space, trial and test function and suitable functions for Level-set
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
-
-        #Define trial and test functions
-        (self.u, self.p) = TrialFunctions(self.W)
-        self.phi         = TrialFunction(self.Q)
-        (self.v, self.q) = TestFunctions(self.W)
-        self.l           = TestFunction(self.Q)
-
-        #Define functions for solutions at previous and current time steps
-        self.w_old    = Function(self.W)
+        self.phi = TrialFunction(self.Q)
+        self.l   = TestFunction(self.Q)
         self.phi_old  = Function(self.Q)
-        self.w_curr   = Function(self.W)
-        (self.u_curr, self.p_curr) = self.w_curr.split(True)
         self.phi_curr = Function(self.Q)
 
         #Define function for reinitialization
@@ -168,8 +178,12 @@ class BubbleMove:
 
         #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
-        (self.u_old, self.p_old) = self.w_old.split()
+        if(self.NS_sol_method == 'Standard'):
+            self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
+            (self.u_old, self.p_old) = self.w_old.split()
+        elif(self.NS_sol_method == 'ICT'):
+            self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
+            self.p_old.assign(interpolate(Constant(0.0),self.P))
         self.rho_old = self.rho(self.phi_old,self.eps)
         self.mu_old  = self.mu(self.phi_old,self.eps)
 
@@ -324,7 +338,10 @@ class BubbleMove:
 
     """Assemble boundary condition"""
     def assembleBC(self):
-        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
+        if(self.NS_sol_method == 'Standard'):
+            self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
+        elif(self.NS_sol_method == 'ICT'):
+            self.bcs = DirichletBC(self.V, Constant((0.0,0.0)), WallBoundary())
 
 
     """Build and solve the system for Navier-Stokes simulation"""
@@ -367,8 +384,6 @@ class BubbleMove:
         #Solve the projection step
         solve(self.A1_tris, self.u_curr.vector(), self.b1_tris)
 
-        #Assign to the vector function space the found solution
-        self.assigner.assign(self.w_curr, [self.u_curr,self.p_curr])
 
     """Build the system for Level set simulation"""
     def solve_Levelset_system(self):
@@ -488,8 +503,12 @@ class BubbleMove:
             end()
 
             #Prepare to next step assign previous-step solution
-            self.w_old.assign(self.w_curr)
-            (self.u_old, self.p_old) = self.w_old.split()
+            if(self.NS_sol_method == 'Standard'):
+                self.w_old.assign(self.w_curr)
+                (self.u_old, self.p_old) = self.w_old.split()
+            elif(self.NS_sol_method == 'ICT'):
+                self.u_old.assign(self.u_curr)
+                self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
             self.rho_old = self.rho(self.phi_old,self.eps)
             self.mu_old = self.mu(self.phi_old,self.eps)
