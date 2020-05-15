@@ -20,6 +20,8 @@ class My_Parameters:
         self.Param.add("Number_vertices", 64)
         self.Param.add("Log_Level", 21) #more than INFO level by default
         self.Param.add("NS_Procedure", 'Standard')
+        self.Param.add("Interface_Thickness", 1e-8)
+        self.Param.add("Stabilization_Parameter", 0.1)
 
         try:
             self.file = open(param_name, "r")
@@ -32,15 +34,11 @@ class My_Parameters:
             f.write("Lighter_density = 1.0\n")
             f.write("Time_step = 0.1\n")
             f.write("End_time = 2.0\n")
-            f.write("Polynomial_degree = 1\n")
-            f.write("Number_vertices = 64\n")
             f.write("Base = 1.0\n")
             f.write("Height = 3.0\n")
             f.write("x_center = 0.5\n")
             f.write("y_center = 0.5\n")
             f.write("Radius = 0.2\n")
-            f.write("Reinit_Type = 'Conservative'\n")
-            f.write("Stabilization_Type = 'IP'\n")
             f.close()
             self.file = open(param_name, "r")
 

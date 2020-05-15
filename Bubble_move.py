@@ -103,12 +103,12 @@ class BubbleMove:
             self.n_mesh = FacetNormal(self.mesh)
             self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
-        #Parameter for interface thickness
-        self.eps = 1.0e-8
-        self.alpha = Constant(0.1) #Penalty parameter
+        #Parameter for interface thickness and stabilization
+        self.eps = self.Param["Interface_Thickness"]
+        self.alpha = self.Param["Stabilization_Parameter"]
 
         #Parameters for reinitialization steps
-        hmin = self.mesh.hmin()
+        hmin = self.mesh.hmin()/self.base
         if(self.reinit_method == 'Non_Conservative'):
             self.eps_reinit = Constant(hmin)
             self.alpha_reinit = Constant(0.0625*hmin)
@@ -505,7 +505,6 @@ class BubbleMove:
             #Prepare to next step assign previous-step solution
             if(self.NS_sol_method == 'Standard'):
                 self.w_old.assign(self.w_curr)
-                (self.u_old, self.p_old) = self.w_old.split()
             elif(self.NS_sol_method == 'ICT'):
                 self.u_old.assign(self.u_curr)
                 self.p_old.assign(self.p_curr)
