@@ -304,8 +304,8 @@ class BubbleMove:
 
         self.a3 = self.phi/self.dt_reinit*self.l*dx
         self.L3 = self.phi0/self.dt_reinit*self.l*dx + \
-                  self.approx_sign*(1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
-                  self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
+                  self.approx_sign*(1.0 - mgrad(self.phi0))*self.l*dx -\
+                  self.alpha_reinit*inner(grad(self.phi0), grad(self.l))*dx
 
         #Save the matrix that will not change and declare vector
         self.A3 = assemble(self.a3)
@@ -412,7 +412,7 @@ class BubbleMove:
             self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
         E_old = 1e10
-        for n in range(10):
+        for n in range(4):
             #Assemble and solve the system
             assemble(self.L3, tensor = self.b3)
             if(self.stab_method == 'Conservative'):
@@ -425,10 +425,8 @@ class BubbleMove:
 
             if(E_old < E):
                 raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
-            elif(E_old - E < 1e-3):
+            elif(E < 1e-3):
                 break
-
-            E_old = E
 
             #Set previous step solution
             self.phi0.assign(self.phi_intermediate)
