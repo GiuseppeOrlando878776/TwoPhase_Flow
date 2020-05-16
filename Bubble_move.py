@@ -110,13 +110,13 @@ class BubbleMove:
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
 
         #Prepare useful variables for stabilization
-        self.h = CellDiameter(self.mesh)/self.L0
+        self.h = CellDiameter(self.mesh)
         if(self.stab_method == 'IP'):
             self.n_mesh = FacetNormal(self.mesh)
             self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
         #Parameters for reinitialization steps
-        hmin = self.mesh.hmin()/self.L0
+        hmin = self.mesh.hmin()
         if(self.reinit_method == 'Non_Conservative'):
             self.eps_reinit = Constant(hmin)
             self.alpha_reinit = Constant(0.0625*hmin)
