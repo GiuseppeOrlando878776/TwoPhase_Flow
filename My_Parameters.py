@@ -17,10 +17,11 @@ class My_Parameters:
         self.Param.add("Polynomial_degree", 1)
         self.Param.add("Reinit_Type", 'Non_Conservative')
         self.Param.add("Stabilization_Type", 'IP')
-        self.Param.add("Number_vertices", 64)
+        self.Param.add("Number_vertices_x", 64)
+        self.Param.add("Number_vertices_y", 128)
         self.Param.add("Log_Level", 21) #more than INFO level by default
         self.Param.add("NS_Procedure", 'Standard')
-        self.Param.add("Interface_Thickness", 1e-8)
+        self.Param.add("Interface_Thickness", 0.025)
         self.Param.add("Stabilization_Parameter", 0.1)
 
         try:
@@ -28,17 +29,19 @@ class My_Parameters:
         except IOError:
             print("Input parameter file '" + param_name + "' not found. Creating a default one")
             f = open(param_name, "w")
-            f.write("Reynolds_number = 1000\n")
-            f.write("Atwood_number = 0.5\n")
+            f.write("Reynolds_number = 35\n")
+            f.write("Atwood_number = 0.82\n")
             f.write("Bond_number = 1.0\n")
-            f.write("Lighter_density = 1.0\n")
+            f.write("Lighter_density = 100\n")
+            f.write("Smaller_viscosity = 1.0\n")
+            f.write("Larger_viscosity = 10.0\n")
             f.write("Time_step = 0.1\n")
             f.write("End_time = 2.0\n")
             f.write("Base = 1.0\n")
-            f.write("Height = 3.0\n")
+            f.write("Height = 2.0\n")
             f.write("x_center = 0.5\n")
             f.write("y_center = 0.5\n")
-            f.write("Radius = 0.2\n")
+            f.write("Radius = 0.25\n")
             f.close()
             self.file = open(param_name, "r")
 

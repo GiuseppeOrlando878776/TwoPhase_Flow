@@ -22,10 +22,12 @@ class BubbleMove:
         self.Param = My_Parameters(param_name).get_param()
 
         try:
-            self.Re            = float(self.Param["Reynolds_number"])
-            self.At            = float(self.Param["Atwood_number"])
             self.Bo            = float(self.Param["Bond_number"])
             self.rho1          = float(self.Param["Lighter_density"])
+            self.mu1           = float(self.Param["Smaller_viscosity"])
+            self.mu2           = float(self.Param["Larger_viscosity"])
+            self.base          = float(self.Param["Base"])
+            self.height        = float(self.Param["Height"])
             self.dt            = float(self.Param["Time_step"])
             self.t_end         = float(self.Param["End_time"])
         except RuntimeError as e:
@@ -39,8 +41,10 @@ class BubbleMove:
         self.reinit_method = self.Param["Reinit_Type"]
         self.stab_method   = self.Param["Stabilization_Type"]
         self.NS_sol_method = self.Param["NS_Procedure"]
+        self.eps = self.Param["Interface_Thickness"]
+        self.alpha = self.Param["Stabilization_Parameter"]
 
-        #Define an auxiliary dictionary to set proper stabilization
+        #Define an auxiliary dictionary to set proper solution procedure for Navier-Stokes
         try:
             self.switcher_NS = {'Standard':self.solve_Standard_NS_system, \
                                 'ICT':self.solve_ICT_NS_systems}
@@ -65,27 +69,33 @@ class BubbleMove:
         assert self.reinit_method in ['Conservative','Non_Conservative'], \
                "Reinitialization method not available"
 
-        #Save computational box extrema
+        #Read or compute the Atwood number according to the configuration file
         try:
-            self.base   = float(self.Param["Base"]) #This is also the reference length
-            self.height = float(self.Param["Height"])
+            self.At = float(self.Param["Atwood_number"])
+            assert self.At > 0.0 and self.At < 1.0, "Invalid Atwood number specified"
+            self.rho2 = (1.0 + self.At)/(1.0 - self.At)
         except RuntimeError as e:
-            print(str(e) +  "\nPlease check configuration file")
-            exit(1)
-
-        #Compute heavier density
-        self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
-
-        #Compute viscosity: the 'lighter' viscosity will be computed by
-        #Reynolds number, while for the 'heavier' we choose to impose a constant
-        #density-viscosity ratio (arbitrary choice)
-        self.mu1 = self.rho1*np.sqrt(9.81*self.At*self.base)*self.base/self.Re
-        self.mu2 = self.rho2*self.mu1/self.rho1
-
-        #Set density (and viscosity) ratio
+            self.rho2 = float(self.Param["Heavier_density"])
+            assert self.rho2 > self.rho1, "The heavier density is not greater than the lighter"
+            self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
+        #Compute density ratio (heavier/lighter) and viscosity ratio
         self.rho2_rho1 = self.rho2/self.rho1
+        self.mu2_mu1   = self.mu2/self.mu1
 
-        #Convert useful constants to constant FENICS function
+        #Compute the reference length (we need it in order to adimensionalize the level-set):
+        #since density and viscosity are physical properties it is reasonable to compute it from the
+        #Reynolds number
+        try:
+            self.Re = float(self.Param["Reynolds_number"])
+            assert self.Re > 1.0, "Invalid Reynolds number specified"
+            self.L0 = (self.mu1*self.Re/(self.rho1*np.sqrt(self.At*9.81)))**(2/3)
+        except RuntimeError as e:
+            #In case Reynolds number is not present set the computational width of the box
+            print("Setting reference length equal to the computational width of the box")
+            self.L0 = self.base
+            self.Re = self.rho1*self.L0*np.sqrt(self.At*self.L0*9.81)/self.mu1
+
+        #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
         self.e2 = Constant((0.0,1.0))
 
@@ -96,22 +106,17 @@ class BubbleMove:
     """Build the mesh for the simulation"""
     def build_mesh(self):
         #Generate mesh
-        n_points = self.Param["Number_vertices"]
         self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.base, self.height), \
-                                  n_points, n_points)
+                                  self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
 
         #Prepare useful variables for stabilization
-        self.h = CellDiameter(self.mesh)/self.base
+        self.h = CellDiameter(self.mesh)/self.L0
         if(self.stab_method == 'IP'):
             self.n_mesh = FacetNormal(self.mesh)
             self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
-        #Parameter for interface thickness and stabilization
-        self.eps = self.Param["Interface_Thickness"]
-        self.alpha = self.Param["Stabilization_Parameter"]
-
         #Parameters for reinitialization steps
-        hmin = self.mesh.hmin()/self.base
+        hmin = self.mesh.hmin()/self.L0
         if(self.reinit_method == 'Non_Conservative'):
             self.eps_reinit = Constant(hmin)
             self.alpha_reinit = Constant(0.0625*hmin)
@@ -126,7 +131,7 @@ class BubbleMove:
         Pelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
 
         #Define FE spaces, trial and test function and suitable functions for NS
-        self.W = FunctionSpace(self.mesh, Velem*Pelem)
+        self.W  = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
@@ -145,13 +150,14 @@ class BubbleMove:
         self.phi_old  = Function(self.Q)
         self.phi_curr = Function(self.Q)
 
-        #Define function for reinitialization
+        #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
         self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
                                                  #reinitialization and it is also useful for clearness
 
-        #Define function for normal to the interface
-        self.grad_phi = Function(self.Q2)
+        #Define function and vector for plotting level-set and computing volume
+        self.tmp = Function(self.Q)
+        self.lev_set = np.empty_like(self.phi_old.vector().get_local())
 
 
     """Set the proper initial condition"""
@@ -165,36 +171,37 @@ class BubbleMove:
             exit(1)
 
         #Set initial condition of bubble and check geoemtric limits
-        f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))-r",
+        f = Expression("r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))",
                         A = center[0], B = center[1], r = radius, degree = 2)
         assert center[0] - radius > 0.0 and center[0] + radius < self.base and \
                center[1] - radius > 0.0 and center[1] + radius < self.height,\
                 "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
-        self.phi_old.assign(interpolate(f,self.Q)/self.base)
+        self.phi_old.assign(interpolate(f,self.Q)/self.L0)
         self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
-        self.rho_old = self.rho(self.phi_old,self.eps)
-        self.mu_old  = self.mu(self.phi_old,self.eps)
+        self.rho_old = self.rho(self.phi_old, self.eps)
+        self.mu_old  = self.mu(self.phi_old, self.eps)
 
         #Compute normal vector to the interface
         self.grad_phi = project(grad(self.phi_old), self.Q2)
         self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
-        #Define function and vector for plotting level-set and computing volume
-        self.tmp = Function(self.Q)
-        self.lev_set = np.empty_like(self.phi_old.vector().get_local())
+
+    """Assemble boundary condition"""
+    def assembleBC(self):
+        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
 
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return (1.0 - CHeaviside(x,eps)) + self.rho2_rho1*CHeaviside(x,eps)
+        return CHeaviside(x,eps) + self.rho2_rho1*(1.0 - CHeaviside(x,eps))
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return (1.0 - CHeaviside(x,eps)) + self.rho2_rho1*CHeaviside(x,eps)
+        return CHeaviside(x,eps) + self.mu2_mu1*(1.0 - CHeaviside(x,eps))
 
 
     """Interior penalty method"""
@@ -335,11 +342,6 @@ class BubbleMove:
             self.CLSM_weak_form()
 
 
-    """Assemble boundary condition"""
-    def assembleBC(self):
-        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
-
-
     """Build and solve the system for Navier-Stokes simulation"""
     def solve_Standard_NS_system(self):
         # Assemble matrices and right-hand sides
@@ -429,7 +431,7 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        self.grad_phi = project(self.base*grad(self.phi_curr), self.Q2)
+        self.grad_phi = project(grad(self.phi_curr), self.Q2)
         self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
@@ -439,13 +441,13 @@ class BubbleMove:
         self.phi_curr_vec = self.phi_curr.vector().get_local()
 
         #Construct vector of ones inside the bubble
-        for i in range(len(self.phi_curr_vec)):
-            self.lev_set[i] = 1.0*(self.phi_curr_vec[i] < 0.0)
+        self.lev_set = 1.0*(self.phi_curr_vec > 0.0)
 
         #Assign vector to FE function
         self.tmp.vector().set_local(self.lev_set)
 
         #Plot the function just computed
+        plot(self.tmp, interactive = False, scalarbar = True)
         #fig = plot(self.tmp, interactive = False, scalarbar = True)
         #plt.colorbar(fig)
         #plt.show()
