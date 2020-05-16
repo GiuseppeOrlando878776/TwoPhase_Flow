@@ -295,6 +295,10 @@ class BubbleMove:
                   self.approx_sign*(1.0 - sqrt(inner(grad(self.phi0), grad(self.phi0))))*self.l*dx -\
                   self.alpha_reinit*inner(grad(self.phi0), grad(self.l))* dx
 
+        #Save the matrix that will not change and declare vector
+        self.A3 = assemble(self.a3)
+        self.b3 = Vector()
+
 
     """Weak form conservative reinitialization"""
     def CLSM_weak_form(self):
@@ -305,6 +309,10 @@ class BubbleMove:
              inner(self.n, grad(self.l))*dx
         self.a3 = lhs(F3)
         self.L3 = rhs(F3)
+
+        #Declare matrix and vector
+        self.A3 = Matrix()
+        self.b3 = Vector()
 
 
     """Set weak formulations"""
@@ -398,8 +406,11 @@ class BubbleMove:
 
         E_old = 1e10
         for n in range(10):
-            #Solve the system
-            solve(self.a3 == self.L3, self.phi_intermediate, [])
+            #Assemble and solve the system
+            assemble(self.L3, tensor = self.b3)
+            if(self.stab_method == 'Conservative'):
+                assemble(self.a3, tensor = self.A3)
+            solve(self.A3, self.phi_intermediate.vector(), self.b3)
 
             #Compute the error and check no divergence
             error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
@@ -435,7 +446,7 @@ class BubbleMove:
         self.tmp.vector().set_local(self.lev_set)
 
         #Plot the function just computed
-        #fig = plot(self.tmp, interactive = True, scalarbar = True)
+        #fig = plot(self.tmp, interactive = False, scalarbar = True)
         #plt.colorbar(fig)
         #plt.show()
 
@@ -453,11 +464,11 @@ class BubbleMove:
         #Set the initial condition
         self.set_initial_condition()
 
-        #Set weak formulations
-        self.set_weak_forms()
-
         #Assemble boundary conditions
         self.assembleBC()
+
+        #Set weak formulations
+        self.set_weak_forms()
 
         #Time-stepping loop
         t = self.dt
