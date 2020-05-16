@@ -95,6 +95,11 @@ class BubbleMove:
             self.L0 = self.base
             self.Re = self.rho1*self.L0*np.sqrt(self.At*self.L0*9.81)/self.mu1
 
+        #Add reference time, velocity and pressure
+        self.t0 = np.sqrt(self.L0/(self.At*9.81))
+        self.U0 = np.sqrt(self.At*9.81*self.L0)
+        self.p0 = self.mu1/self.t0
+
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
         self.e2 = Constant((0.0,1.0))
@@ -178,7 +183,7 @@ class BubbleMove:
                 "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
-        self.phi_old.assign(interpolate(f,self.Q)/self.L0)
+        self.phi_old.assign(interpolate(f,self.Q))
         self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old, self.eps)
@@ -475,7 +480,7 @@ class BubbleMove:
         #Time-stepping loop
         t = self.dt
         while t <= self.t_end:
-            begin(int(LogLevel.INFO) + 1,"t = " + str(t))
+            begin(int(LogLevel.INFO) + 1,"t = " + str(t*self.t0) + " s")
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
