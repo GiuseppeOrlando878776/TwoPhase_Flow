@@ -226,14 +226,13 @@ class BubbleMove:
 
     """Weak formulation for Navier-Stokes"""
     def NS_weak_form(self):
-        F1 = self.Re*self.At*self.Bo*self.rho_old* \
-             (inner((self.u - self.u_old)/self.DT, self.v) + \
-              inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-           + 2.0*self.At*self.Bo*self.mu_old*inner(D(self.u), grad(self.v))*dx \
-           - self.At*self.Bo*self.p*div(self.v)*dx \
-           + self.Re*self.At*self.Bo*div(self.u)*self.q*dx \
-           + self.Re*self.Bo*self.rho_old*inner(self.e2, self.v)*dx \
-           + self.Re*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+        F1 = self.rho_old*(inner((self.u - self.u_old)/self.DT, self.v) + \
+                           inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
+           + 2.0/self.Re*self.mu_old*inner(D(self.u), grad(self.v))*dx \
+           - 1.0/self.Re*self.p*div(self.v)*dx \
+           + div(self.u)*self.q*dx \
+           + 1.0/self.At*self.rho_old*inner(self.e2, self.v)*dx \
+           + 1.0/self.Bo*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
