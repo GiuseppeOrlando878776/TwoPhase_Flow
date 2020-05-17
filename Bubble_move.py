@@ -455,6 +455,8 @@ class BubbleMove:
             #fig = plot(self.tmp, interactive = False, scalarbar = True)
             #plt.colorbar(fig)
             plt.show()
+            self.vtkfile_phi << (self.phi_curr, self.t*self.t0)
+            self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
@@ -477,10 +479,12 @@ class BubbleMove:
         self.set_weak_forms()
 
         #Time-stepping loop
-        t = self.dt
+        self.t = self.dt
         self.n_iter = 0
-        while t <= self.t_end:
-            begin(int(LogLevel.INFO) + 1,"t = " + str(t*self.t0) + " s")
+        self.vtkfile_phi = File('phi.pvd')
+        self.vtkfile_phi_draw = File('phi_draw.pvd')
+        while self.t <= self.t_end:
+            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
@@ -519,4 +523,4 @@ class BubbleMove:
             self.rho_old = self.rho(self.phi_old,self.eps)
             self.mu_old = self.mu(self.phi_old,self.eps)
 
-            t = t + self.dt if t + self.dt <= self.t_end or abs(t - self.t_end) < DOLFIN_EPS else self.t_end
+            self.t += self.dt if self.t + self.dt <= self.t_end or abs(self.t - self.t_end) < DOLFIN_EPS else self.t_end
