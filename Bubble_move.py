@@ -3,7 +3,7 @@ from Auxiliary_Functions import *
 from Boundary_Conditions import WallBoundary
 
 from sys import exit
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 class BubbleMove:
     """Class constructor"""
@@ -176,7 +176,7 @@ class BubbleMove:
             exit(1)
 
         #Set initial condition of bubble and check geoemtric limits
-        f = Expression("r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))",
+        f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                         A = center[0], B = center[1], r = radius, degree = 2)
         assert center[0] - radius > 0.0 and center[0] + radius < self.base and \
                center[1] - radius > 0.0 and center[1] + radius < self.height,\
@@ -184,7 +184,7 @@ class BubbleMove:
 
         #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
+        self.w_old.assign(interpolate(Constant((0.0,1.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old, self.eps)
         self.mu_old  = self.mu(self.phi_old, self.eps)
@@ -398,6 +398,10 @@ class BubbleMove:
         #Solve the level-set system
         solve(self.A2, self.phi_curr.vector(), self.b2)
 
+        #Compute normal vector (in case we avoid reconstrution)
+        self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+
 
     """Build the system for Level set reinitialization"""
     def Levelset_reinit(self):
@@ -406,9 +410,6 @@ class BubbleMove:
         self.phi0.assign(self.phi_curr)
         if(self.reinit_method == 'Non_Conservative'):
             self.approx_sign = signp(self.phi_curr, self.eps_reinit)
-        elif(self.reinit_method == 'Conservative'):
-            self.grad_phi = project(grad(self.phi_curr), self.Q2)
-            self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
         E_old = 1e10
         for n in range(4):
@@ -443,16 +444,17 @@ class BubbleMove:
         self.phi_curr_vec = self.phi_curr.vector().get_local()
 
         #Construct vector of ones inside the bubble
-        self.lev_set = 1.0*(self.phi_curr_vec > 0.0)
+        self.lev_set = 1.0*(self.phi_curr_vec < 0.0)
 
         #Assign vector to FE function
         self.tmp.vector().set_local(self.lev_set)
 
         #Plot the function just computed
-        plot(self.tmp, interactive = False, scalarbar = True)
-        #fig = plot(self.tmp, interactive = False, scalarbar = True)
-        #plt.colorbar(fig)
-        #plt.show()
+        if(self.n_iter % 5 == 0):
+            plot(self.tmp, interactive = False, scalarbar = True)
+            #fig = plot(self.tmp, interactive = False, scalarbar = True)
+            #plt.colorbar(fig)
+            plt.show()
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
@@ -476,6 +478,7 @@ class BubbleMove:
 
         #Time-stepping loop
         t = self.dt
+        self.n_iter = 0
         while t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(t*self.t0) + " s")
 
@@ -492,6 +495,7 @@ class BubbleMove:
             end()
 
             #Apply reinitialization for level-set
+            """
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                 self.Levelset_reinit()
@@ -500,8 +504,10 @@ class BubbleMove:
                 print(e)
                 print("Aborting simulation...")
                 exit(1)
+            """
 
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
+            self.n_iter += 1
             self.plot_and_volume()
             end()
 
