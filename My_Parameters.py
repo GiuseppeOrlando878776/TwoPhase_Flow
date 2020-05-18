@@ -18,7 +18,7 @@ class My_Parameters:
         self.Param.add("Reinit_Type", 'Non_Conservative')
         self.Param.add("Stabilization_Type", 'IP')
         self.Param.add("Number_vertices_x", 128)
-        self.Param.add("Number_vertices_y", 256)
+        self.Param.add("Number_vertices_y", 128)
         self.Param.add("Log_Level", 21) #more than INFO level by default
         self.Param.add("NS_Procedure", 'Standard')
         self.Param.add("Interface_Thickness", 0.025)

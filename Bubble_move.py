@@ -3,7 +3,7 @@ from Auxiliary_Functions import *
 from Boundary_Conditions import WallBoundary
 
 from sys import exit
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 class BubbleMove:
     """Class constructor"""
@@ -184,7 +184,7 @@ class BubbleMove:
 
         #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        self.w_old.assign(interpolate(Constant((0.0,1.0,0.0)),self.W))
+        self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old, self.eps)
         self.mu_old  = self.mu(self.phi_old, self.eps)
@@ -201,12 +201,12 @@ class BubbleMove:
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return CHeaviside(x,eps) + self.rho2_rho1*(1.0 - CHeaviside(x,eps))
+        return self.rho2_rho1*CHeaviside(x,eps) + (1.0 - CHeaviside(x,eps))
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return CHeaviside(x,eps) + self.mu2_mu1*(1.0 - CHeaviside(x,eps))
+        return self.mu2_mu1*CHeaviside(x,eps) + (1.0 - CHeaviside(x,eps))
 
 
     """Interior penalty method"""
@@ -412,7 +412,7 @@ class BubbleMove:
             self.approx_sign = signp(self.phi_curr, self.eps_reinit)
 
         E_old = 1e10
-        for n in range(4):
+        for n in range(10):
             #Assemble and solve the system
             assemble(self.L3, tensor = self.b3)
             if(self.stab_method == 'Conservative'):
@@ -450,12 +450,11 @@ class BubbleMove:
         self.tmp.vector().set_local(self.lev_set)
 
         #Plot the function just computed
-        if(self.n_iter % 5 == 0):
+        if(self.n_iter % 50 == 0):
             plot(self.tmp, interactive = False, scalarbar = True)
             #fig = plot(self.tmp, interactive = False, scalarbar = True)
             #plt.colorbar(fig)
-            plt.show()
-            self.vtkfile_phi << (self.phi_curr, self.t*self.t0)
+            #plt.show()
             self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
 
         #Check volume consistency
@@ -481,8 +480,7 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi = File('phi.pvd')
-        self.vtkfile_phi_draw = File('phi_draw.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim8/phi_draw.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
@@ -499,7 +497,6 @@ class BubbleMove:
             end()
 
             #Apply reinitialization for level-set
-            """
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                 self.Levelset_reinit()
@@ -508,8 +505,8 @@ class BubbleMove:
                 print(e)
                 print("Aborting simulation...")
                 exit(1)
-            """
-
+            
+	    #Save and compute volume
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
             self.n_iter += 1
             self.plot_and_volume()
