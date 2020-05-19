@@ -24,6 +24,7 @@ class BubbleMove:
         try:
             self.Bo            = float(self.Param["Bond_number"])
             self.rho1          = float(self.Param["Lighter_density"])
+            self.rho2          = float(self.Param["Heavier_density"])  
             self.mu1           = float(self.Param["Smaller_viscosity"])
             self.mu2           = float(self.Param["Larger_viscosity"])
             self.base          = float(self.Param["Base"])
@@ -33,6 +34,8 @@ class BubbleMove:
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
             exit(1)
+
+        assert self.rho2 > self.rho1, "The heavier density is not greater than the lighter" 
 
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
@@ -69,36 +72,30 @@ class BubbleMove:
         assert self.reinit_method in ['Conservative','Non_Conservative'], \
                "Reinitialization method not available"
 
-        #Read or compute the Atwood number according to the configuration file
-        try:
-            self.At = float(self.Param["Atwood_number"])
-            assert self.At > 0.0 and self.At < 1.0, "Invalid Atwood number specified"
-            self.rho2 = (1.0 + self.At)/(1.0 - self.At)
-        except RuntimeError as e:
-            self.rho2 = float(self.Param["Heavier_density"])
-            assert self.rho2 > self.rho1, "The heavier density is not greater than the lighter"
-            self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
-        #Compute density ratio (heavier/lighter) and viscosity ratio
-        self.rho2_rho1 = self.rho2/self.rho1
-        self.mu2_mu1   = self.mu2/self.mu1
-
+        #Compute the Atwood number according to the configuration file
+        self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
+        
+        #Compute density and viscosity ratio
+        self.rho1_rho2 = self.rho1/self.rho2
+        self.mu1_mu2 = self.mu1/self.mu2
+        
         #Compute the reference length (we need it in order to adimensionalize the level-set):
         #since density and viscosity are physical properties it is reasonable to compute it from the
         #Reynolds number
         try:
             self.Re = float(self.Param["Reynolds_number"])
             assert self.Re > 1.0, "Invalid Reynolds number specified"
-            self.L0 = (self.mu1*self.Re/(self.rho1*np.sqrt(self.At*9.81)))**(2/3)
+            self.L0 = (self.mu2*self.Re/(self.rho2*np.sqrt(self.At*0.98)))**(2/3)
         except RuntimeError as e:
             #In case Reynolds number is not present set the computational width of the box
             print("Setting reference length equal to the computational width of the box")
             self.L0 = self.base
-            self.Re = self.rho1*self.L0*np.sqrt(self.At*self.L0*9.81)/self.mu1
+            self.Re = self.rho2*self.L0*np.sqrt(self.At*self.L0*0.98)/self.mu1
 
         #Add reference time, velocity and pressure
-        self.t0 = np.sqrt(self.L0/(self.At*9.81))
-        self.U0 = np.sqrt(self.At*9.81*self.L0)
-        self.p0 = self.mu1/self.t0
+        self.t0 = np.sqrt(self.L0/(self.At*0.98))
+        self.U0 = np.sqrt(self.At*0.98*self.L0)
+        self.p0 = self.mu2/self.t0
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
@@ -184,7 +181,7 @@ class BubbleMove:
 
         #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
+        self.w_old.assign(interpolate(Constant((0.0,0.1,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old, self.eps)
         self.mu_old  = self.mu(self.phi_old, self.eps)
@@ -201,12 +198,12 @@ class BubbleMove:
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return self.rho2_rho1*CHeaviside(x,eps) + (1.0 - CHeaviside(x,eps))
+        return CHeaviside(x,eps) + self.rho1_rho2*(1.0 - CHeaviside(x,eps))
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return self.mu2_mu1*CHeaviside(x,eps) + (1.0 - CHeaviside(x,eps))
+        return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
 
 
     """Interior penalty method"""
@@ -228,11 +225,11 @@ class BubbleMove:
     def NS_weak_form(self):
         F1 = self.rho_old*(inner((self.u - self.u_old)/self.DT, self.v) + \
                            inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-           + 2.0/self.Re*self.mu_old*inner(D(self.u), grad(self.v))*dx \
+           + 2.0/self.Re*self.mu_old*inner(D(self.u), D(self.v))*dx \
            - 1.0/self.Re*self.p*div(self.v)*dx \
            + div(self.u)*self.q*dx \
            + 1.0/self.At*self.rho_old*inner(self.e2, self.v)*dx \
-           + 1.0/self.Bo*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+           + 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -417,7 +414,7 @@ class BubbleMove:
             assemble(self.L3, tensor = self.b3)
             if(self.stab_method == 'Conservative'):
                 assemble(self.a3, tensor = self.A3)
-            solve(self.A3, self.phi_intermediate.vector(), self.b3)
+            solve(self.A3, self.phi_intermediate.vector(), self.b3, "cg")
 
             #Compute the error and check no divergence
             error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
@@ -456,6 +453,7 @@ class BubbleMove:
             #plt.colorbar(fig)
             #plt.show()
             self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
+            self.vtkfile_u << (self.u_curr, self.t*self.t0)
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
@@ -480,7 +478,8 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim8/phi_draw.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim14/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim14/u.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
@@ -497,6 +496,7 @@ class BubbleMove:
             end()
 
             #Apply reinitialization for level-set
+            """
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                 self.Levelset_reinit()
@@ -505,7 +505,7 @@ class BubbleMove:
                 print(e)
                 print("Aborting simulation...")
                 exit(1)
-            
+            """
 	    #Save and compute volume
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
             self.n_iter += 1
