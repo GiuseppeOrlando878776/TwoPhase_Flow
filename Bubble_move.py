@@ -24,7 +24,7 @@ class BubbleMove:
         try:
             self.Bo            = float(self.Param["Bond_number"])
             self.rho1          = float(self.Param["Lighter_density"])
-            self.rho2          = float(self.Param["Heavier_density"])  
+            self.rho2          = float(self.Param["Heavier_density"])
             self.mu1           = float(self.Param["Smaller_viscosity"])
             self.mu2           = float(self.Param["Larger_viscosity"])
             self.base          = float(self.Param["Base"])
@@ -35,7 +35,7 @@ class BubbleMove:
             print(str(e) +  "\nPlease check configuration file")
             exit(1)
 
-        assert self.rho2 > self.rho1, "The heavier density is not greater than the lighter" 
+        assert self.rho2 > self.rho1, "The heavier density is not greater than the lighter"
 
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
@@ -48,6 +48,7 @@ class BubbleMove:
         self.alpha = self.Param["Stabilization_Parameter"]
 
         #Define an auxiliary dictionary to set proper solution procedure for Navier-Stokes
+        """
         try:
             self.switcher_NS = {'Standard':self.solve_Standard_NS_system, \
                                 'ICT':self.solve_ICT_NS_systems}
@@ -57,6 +58,7 @@ class BubbleMove:
             exit(1)
         assert self.NS_sol_method in self.switcher_NS, \
                "Solution method for Navier-Stokes not available"
+        """
 
         #Define an auxiliary dictionary to set proper stabilization
         try:
@@ -74,11 +76,11 @@ class BubbleMove:
 
         #Compute the Atwood number according to the configuration file
         self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
-        
+
         #Compute density and viscosity ratio
         self.rho1_rho2 = self.rho1/self.rho2
         self.mu1_mu2 = self.mu1/self.mu2
-        
+
         #Compute the reference length (we need it in order to adimensionalize the level-set):
         #since density and viscosity are physical properties it is reasonable to compute it from the
         #Reynolds number
@@ -119,14 +121,10 @@ class BubbleMove:
 
         #Parameters for reinitialization steps
         hmin = self.mesh.hmin()
-        if(self.reinit_method == 'Non_Conservative'):
-            self.eps_reinit = Constant(hmin)
-            self.alpha_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
-                                                                    #and so a very small step is needed
-        elif(self.reinit_method == 'Conservative'):
-            self.dt_reinit = Constant(0.5*hmin**(1.1))
-            self.eps_reinit = Constant(0.5*hmin**(0.9))
+        self.eps_reinit = Constant(hmin)
+        self.alpha_reinit = Constant(0.0625*hmin)
+        self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                #and so a very small step is needed
 
         #Define function spaces
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
@@ -147,8 +145,6 @@ class BubbleMove:
         self.w_old  = Function(self.W)
         self.w_curr = Function(self.W)
         (self.u_curr, self.p_curr) = self.w_curr.split()
-        if(self.NS_sol_method == 'ICT'):
-            self.assigner = FunctionAssigner(self.W, [self.W.sub(0), self.W.sub(1)])
         self.phi_old  = Function(self.Q)
         self.phi_curr = Function(self.Q)
 
@@ -229,7 +225,7 @@ class BubbleMove:
            + 2.0/self.Re*self.mu_old*inner(D(self.u), D(self.v))*dx \
            - 1.0/self.Re*self.p*div(self.v)*dx \
            + div(self.u)*self.q*dx \
-           - 1.0/self.At*self.rho_old*inner(self.e2, self.v)*dx \
+           + 1.0/self.At*self.rho_old*inner(self.e2, self.v)*dx \
            #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -240,52 +236,12 @@ class BubbleMove:
         self.b1 = Vector()
 
 
-    """Weak formulation step 1 ICT(Incremental Chorin-Temam)"""
-    def Step1_ICT_weak_form(self):
-        #Define intermediate function
-        self.U_12 = 0.5*(self.u + self.u_old)
-
-        F1 = self.Re*self.At*self.Bo*self.rho_old* \
-             (inner((self.u - self.u_old)/self.DT, self.v) + \
-              inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-            + 2.0*self.At*self.Bo*self.mu_old*inner(D(self.U_12), grad(self.v))*dx \
-            + self.Re*self.Bo*self.rho_old*inner(self.e2, self.v)*dx \
-            + self.Re*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
-
-        #Save corresponding weak form and declare suitable matrix and vector
-        self.a1 = lhs(F1)
-        self.L1 = rhs(F1)
-
-        self.A1 = Matrix()
-        self.b1 = Vector()
-
-
-    """Weak formulation step 2 ICT(Incremental Chorin-Temam)"""
-    def Step2_ICT_weak_form(self):
-        self.a1_bis = inner(grad(self.p), grad(self.q))*dx
-        self.L1_bis = inner(grad(self.p_old), grad(self.q))*dx - \
-                      (1.0/self.DT)*div(self.u_curr)*self.q*dx
-
-        self.A1_bis = Matrix()
-        self.b1_bis = Vector()
-
-
-    """Weak formulation velocity projection ICT(Incremental Chorin-Temam)"""
-    def Step3_ICT_weak_form(self):
-        self.a1_tris = inner(self.u, self.v)*dx
-        self.L1_tris = inner(self.u_curr, self.v)*dx - \
-                       self.DT*inner(grad(self.p_curr - self.p_old), self.v)*dx
-
-        self.A1_tris = Matrix()
-        self.b1_tris = Vector()
-
-
     """Level-set weak formulation"""
     def LS_weak_form(self):
         F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
            + inner(self.u_curr, grad(self.phi))*self.l*dx
 
-        F2 += self.switcher_stab[self.stab_method](self.phi, self.l)
+        #F2 += self.switcher_stab[self.stab_method](self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -309,39 +265,16 @@ class BubbleMove:
         self.b3 = Vector()
 
 
-    """Weak form conservative reinitialization"""
-    def CLSM_weak_form(self):
-        F3 = (self.phi - self.phi0)/self.dt_reinit*self.l*dx \
-           - 0.5*(self.phi + self.phi0)*(1.0 - 0.5*(self.phi + self.phi0))* \
-             inner(self.n, grad(self.l))*dx \
-           + self.eps_reinit*inner(self.n, grad((0.5*(self.phi + self.phi0))))* \
-             inner(self.n, grad(self.l))*dx
-        self.a3 = lhs(F3)
-        self.L3 = rhs(F3)
-
-        #Declare matrix and vector
-        self.A3 = Matrix()
-        self.b3 = Vector()
-
-
     """Set weak formulations"""
     def set_weak_forms(self):
         #Set variational problem for step 1 (Navier-Stokes)
-        if(self.NS_sol_method == 'Standard'):
-            self.NS_weak_form()
-        elif(self.NS_sol_method == 'ICT'):
-            self.Step1_ICT_weak_form()
-            self.Step2_ICT_weak_form()
-            self.Step3_ICT_weak_form()
+        self.NS_weak_form()
 
         #Set variational problem for step 2 (Level-set)
         self.LS_weak_form()
 
         #Set weak form for level-set reinitialization
-        if(self.reinit_method == 'Non_Conservative'):
-            self.NCLSM_weak_form()
-        elif(self.reinit_method == 'Conservative'):
-            self.CLSM_weak_form()
+        self.NCLSM_weak_form()
 
 
     """Build and solve the system for Navier-Stokes simulation"""
@@ -356,35 +289,7 @@ class BubbleMove:
 
         #Solve the system
         solve(self.A1, self.w_curr.vector(), self.b1)
-        (self.u_curr, self.p_curr) = self.w_curr.split()
-
-
-    """Build the systems for Navier-Stokes solution through ICT"""
-    def solve_ICT_NS_systems(self):
-        #Assemble matrix and right-hand side for first step
-        assemble(self.a1, tensor = self.A1)
-        assemble(self.L1, tensor = self.b1)
-        self.bcs.apply(self.A1)
-        self.bcs.apply(self.b1)
-
-        #Solve the first step
-        solve(self.A1, self.u_curr.vector(), self.b1)
-
-        #Assemble matrix and right-hand side for second step
-        assemble(self.a1_bis, tensor = self.A1_bis)
-        assemble(self.L1_bis, tensor = self.b1_bis)
-
-        #Solve the second step
-        solve(self.A1_bis, self.p_curr.vector(), self.b1_bis)
-
-        #Assemble matrix and right-hand side for the velocity projection step
-        assemble(self.a1_tris, tensor = self.A1_tris)
-        assemble(self.L1_tris, tensor = self.b1_tris)
-
-        #Solve the projection step
-        solve(self.A1_tris, self.u_curr.vector(), self.b1_tris)
-
-        self.assigner.assign(self.w_curr, [self.u_curr, self.p_curr])
+        #(self.u_curr, self.p_curr) = self.w_curr.split()
 
 
     """Build the system for Level set simulation"""
@@ -406,15 +311,12 @@ class BubbleMove:
         #Assign current solution and current normal vector to the interface
         #in case of conservative simulation
         self.phi0.assign(self.phi_curr)
-        if(self.reinit_method == 'Non_Conservative'):
-            self.approx_sign = signp(self.phi_curr, self.eps_reinit)
+        self.approx_sign = signp(self.phi_curr, self.eps_reinit)
 
         E_old = 1e10
         for n in range(4):
             #Assemble and solve the system
             assemble(self.L3, tensor = self.b3)
-            if(self.stab_method == 'Conservative'):
-                assemble(self.a3, tensor = self.A3)
             solve(self.A3, self.phi_intermediate.vector(), self.b3, "cg")
 
             #Compute the error and check no divergence
@@ -481,15 +383,16 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim24/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim24/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim24/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim25/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim25/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim25/rho.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
-            self.switcher_NS[self.NS_sol_method]()
+            self.solve_Standard_NS_system()
+            #self.switcher_NS[self.NS_sol_method]()
             #print(self.u_curr.vector().get_local())
             end()
 
@@ -510,7 +413,7 @@ class BubbleMove:
                 print("Aborting simulation...")
                 exit(1)
             """
-	    #Save and compute volume
+	        #Save and compute volume
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
             self.n_iter += 1
             self.plot_and_volume()
