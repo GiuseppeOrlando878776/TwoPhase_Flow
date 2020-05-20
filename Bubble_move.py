@@ -135,7 +135,7 @@ class BubbleMove:
         #Define FE spaces, trial and test function and suitable functions for NS
         self.W  = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
-        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+        #self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         (self.u, self.p) = TrialFunctions(self.W)
@@ -160,6 +160,7 @@ class BubbleMove:
         #Define function and vector for plotting level-set and computing volume
         self.tmp = Function(self.Q)
         self.lev_set = np.empty_like(self.phi_old.vector().get_local())
+        self.rho_interp = Function(self.Q)
 
 
     """Set the proper initial condition"""
@@ -187,8 +188,8 @@ class BubbleMove:
         self.mu_old  = self.mu(self.phi_old, self.eps)
 
         #Compute normal vector to the interface
-        self.grad_phi = project(grad(self.phi_old), self.Q2)
-        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        #self.grad_phi = project(grad(self.phi_old), self.Q2)
+        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
     """Assemble boundary condition"""
@@ -228,8 +229,8 @@ class BubbleMove:
            + 2.0/self.Re*self.mu_old*inner(D(self.u), D(self.v))*dx \
            - 1.0/self.Re*self.p*div(self.v)*dx \
            + div(self.u)*self.q*dx \
-           + 1.0/self.At*self.rho_old*inner(self.e2, self.v)*dx \
-           + 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+           - 1.0/self.At*self.rho_old*inner(self.e2, self.v)*dx \
+           #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -396,8 +397,8 @@ class BubbleMove:
         solve(self.A2, self.phi_curr.vector(), self.b2)
 
         #Compute normal vector (in case we avoid reconstrution)
-        self.grad_phi = project(grad(self.phi_curr), self.Q2)
-        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        #self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
     """Build the system for Level set reinitialization"""
@@ -409,7 +410,7 @@ class BubbleMove:
             self.approx_sign = signp(self.phi_curr, self.eps_reinit)
 
         E_old = 1e10
-        for n in range(10):
+        for n in range(4):
             #Assemble and solve the system
             assemble(self.L3, tensor = self.b3)
             if(self.stab_method == 'Conservative'):
@@ -431,8 +432,8 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        self.grad_phi = project(grad(self.phi_curr), self.Q2)
-        self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        #self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
     """Plot the level-set function and compute the volume"""
@@ -454,6 +455,8 @@ class BubbleMove:
             #plt.show()
             self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
             self.vtkfile_u << (self.u_curr, self.t*self.t0)
+            self.rho_interp.assign(project(self.rho_old,self.Q))
+            self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
@@ -478,8 +481,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim14/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim14/u.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim24/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim24/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim24/rho.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
