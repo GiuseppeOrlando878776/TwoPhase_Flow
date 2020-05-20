@@ -178,7 +178,7 @@ class BubbleMove:
 
         #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        self.w_old.assign(interpolate(Constant((0.0,0.1,0.0)),self.W))
+        self.w_old.assign(interpolate(Constant((0.0,-0.1,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old, self.eps)
         self.mu_old  = self.mu(self.phi_old, self.eps)
@@ -241,7 +241,7 @@ class BubbleMove:
         F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
            + inner(self.u_curr, grad(self.phi))*self.l*dx
 
-        #F2 += self.switcher_stab[self.stab_method](self.phi, self.l)
+        F2 += self.switcher_stab[self.stab_method](self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -302,7 +302,7 @@ class BubbleMove:
         solve(self.A2, self.phi_curr.vector(), self.b2)
 
         #Compute normal vector (in case we avoid reconstrution)
-        #self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        #self.grad_phi.assign(project(grad(self.phi_curr), self.Q2))
         #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
@@ -334,7 +334,7 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        #self.grad_phi = project(grad(self.phi_curr), self.Q2)
+        #self.grad_phi.assign(project(grad(self.phi_curr), self.Q2))
         #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
@@ -383,9 +383,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim25/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim25/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim25/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim28/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim28/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim28/rho.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
