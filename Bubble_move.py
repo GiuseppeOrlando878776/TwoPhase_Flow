@@ -187,10 +187,11 @@ class BubbleMove:
         #self.grad_phi = project(grad(self.phi_old), self.Q2)
         #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
-
+ 
     """Assemble boundary condition"""
     def assembleBC(self):
-        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), WallBoundary())
+        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), 'near(x[1], 0) || near(x[1], 2.0)'
+)
 
 
     """Auxiliary function to compute density"""
@@ -383,9 +384,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim28/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim28/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim28/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim29/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim29/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim29/rho.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
@@ -403,7 +404,7 @@ class BubbleMove:
             end()
 
             #Apply reinitialization for level-set
-            """
+            
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                 self.Levelset_reinit()
@@ -412,7 +413,7 @@ class BubbleMove:
                 print(e)
                 print("Aborting simulation...")
                 exit(1)
-            """
+            
 	        #Save and compute volume
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
             self.n_iter += 1
