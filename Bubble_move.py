@@ -178,7 +178,7 @@ class BubbleMove:
 
         #Assign initial condition
         self.phi_old.assign(interpolate(f,self.Q))
-        self.w_old.assign(interpolate(Constant((0.0,-0.1,0.0)),self.W))
+        self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         (self.u_old, self.p_old) = self.w_old.split()
         self.rho_old = self.rho(self.phi_old, self.eps)
         self.mu_old  = self.mu(self.phi_old, self.eps)
@@ -187,11 +187,11 @@ class BubbleMove:
         #self.grad_phi = project(grad(self.phi_old), self.Q2)
         #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
- 
+
     """Assemble boundary condition"""
     def assembleBC(self):
-        self.bcs = DirichletBC(self.W.sub(0), Constant((0.0,0.0)), 'near(x[1], 0) || near(x[1], 2.0)'
-)
+        self.bcs = [DirichletBC(self.W.sub(0), Constant((0.0,0.0)), 'near(x[1], 0.0) || near(x[1], 2.0)'),
+                    DirichletBC(self.W.sub(0).sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
 
 
     """Auxiliary function to compute density"""
@@ -285,8 +285,8 @@ class BubbleMove:
         assemble(self.L1, tensor = self.b1)
 
         # Apply boundary conditions
-        self.bcs.apply(self.A1)
-        self.bcs.apply(self.b1)
+        [bc.apply(self.A1) for bc in self.bcs]
+        [bc.apply(self.b1) for bc in self.bcs]
 
         #Solve the system
         solve(self.A1, self.w_curr.vector(), self.b1)
@@ -384,9 +384,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim29/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim29/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim29/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim30/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim30/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim30/rho.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
@@ -404,7 +404,7 @@ class BubbleMove:
             end()
 
             #Apply reinitialization for level-set
-            
+
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                 self.Levelset_reinit()
@@ -413,7 +413,7 @@ class BubbleMove:
                 print(e)
                 print("Aborting simulation...")
                 exit(1)
-            
+
 	        #Save and compute volume
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
             self.n_iter += 1
