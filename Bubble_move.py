@@ -112,11 +112,12 @@ class BubbleMove:
         self.p_old    = Function(self.P)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
+        self.rho_old  = Function(self.Q)
+        self.mu_old   = Function(self.Q)
 
         #Define function and vector for plotting level-set and computing volume
         self.tmp = Function(self.Q)
         self.lev_set = np.empty_like(self.phi_old.vector().get_local())
-        self.rho_interp = Function(self.Q)
 
 
     """Set the proper initial condition"""
@@ -140,8 +141,8 @@ class BubbleMove:
         self.u_old.assign(interpolate(Constant((0.0,0.1)),self.V))
         self.p_old.assign(interpolate(Constant(0.0),self.P))
         self.phi_old.assign(interpolate(f,self.Q))
-        self.rho_old = self.rho(self.phi_old, self.eps)
-        self.mu_old  = self.mu(self.phi_old, self.eps)
+        self.rho_old.assign(project(self.rho(self.phi_old, self.eps), self.Q))
+        self.mu_old.assign(project(self.mu(self.phi_old, self.eps), self.Q))
 
         #Compute normal vector to the interface
         #self.grad_phi = project(grad(self.phi_old), self.Q2)
@@ -287,8 +288,7 @@ class BubbleMove:
             #plt.show()
             self.vtkfile_phi_draw << (self.tmp, self.t)
             self.vtkfile_u << (self.u_curr, self.t)
-            self.rho_interp.assign(project(self.rho(self.phi_curr),self.Q))
-            self.vtkfile_rho << (self.rho_interp, self.t)
+            self.vtkfile_rho << (self.rho_old, self.t)
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
@@ -329,6 +329,12 @@ class BubbleMove:
             self.solve_Levelset_system()
             end()
 
+            #Prepare to next step assign previous-step solution
+            self.u_old.assign(self.u_curr)
+            self.phi_old.assign(self.phi_curr)
+            self.rho_old.assign(project(self.rho(self.phi_old,self.eps),self.Q))
+            self.mu_old.assign(project(self.mu(self.phi_old,self.eps), self.Q))
+
             #Save and compute volume
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
             self.n_iter += 1
@@ -336,11 +342,5 @@ class BubbleMove:
             end()
 
             end()
-
-            #Prepare to next step assign previous-step solution
-            self.u_old.assign(self.u_curr)
-            self.phi_old.assign(self.phi_curr)
-            self.rho_old = self.rho(self.phi_old,self.eps)
-            self.mu_old = self.mu(self.phi_old,self.eps)
 
             self.t += self.dt if self.t + self.dt <= self.t_end or abs(self.t - self.t_end) < DOLFIN_EPS else self.t_end
