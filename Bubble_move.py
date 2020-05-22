@@ -196,12 +196,12 @@ class BubbleMove:
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return CHeaviside(x,eps) + self.rho1_rho2*(1.0 - CHeaviside(x,eps))
+        return self.rho2*CHeaviside(x,eps) + self.rho1*(1.0 - CHeaviside(x,eps))
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
+        return self.mu2*CHeaviside(x,eps) + self.mu1*(1.0 - CHeaviside(x,eps))
 
 
     """Interior penalty method"""
@@ -221,12 +221,12 @@ class BubbleMove:
 
     """Weak formulation for Navier-Stokes"""
     def NS_weak_form(self):
-        F1 = self.rho_old*(inner((self.u - self.u_old)/self.DT, self.v) + \
-                           inner(dot(self.u_old, nabla_grad(self.u)), self.v))*dx \
-           + 2.0/self.Re*self.mu_old*inner(D(self.u), D(self.v))*dx \
-           - 1.0/self.Re*self.p*div(self.v)*dx \
+        F1 = inner(self.rho_old*(self.u - self.u_old)/self.DT, self.v)*dx  \
+           + inner(self.rho_old*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
+           + 2.0*inner(self.mu_old*D(self.u), D(self.v))*dx \
+           - self.p*div(self.v)*dx \
            + div(self.u)*self.q*dx \
-           + 1.0/self.At*self.rho_old*inner(self.e2, self.v)*dx \
+           + 0.98*inner(self.rho_old*self.e2, self.v)*dx \
            #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -356,10 +356,10 @@ class BubbleMove:
             #fig = plot(self.tmp, interactive = False, scalarbar = True)
             #plt.colorbar(fig)
             #plt.show()
-            self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
-            self.vtkfile_u << (self.u_curr, self.t*self.t0)
+            self.vtkfile_phi_draw << (self.tmp, self.t)
+            self.vtkfile_u << (self.u_curr, self.t)
             self.rho_interp.assign(project(self.rho_old,self.Q))
-            self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
+            self.vtkfile_rho << (self.rho_interp, self.t)
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
@@ -384,11 +384,11 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim30/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim30/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim30/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim37/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim37/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim37/rho.pvd')
         while self.t <= self.t_end:
-            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
+            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t) + " s")
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
