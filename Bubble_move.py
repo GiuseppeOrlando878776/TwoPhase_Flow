@@ -1,9 +1,7 @@
 from My_Parameters import My_Parameters
 from Auxiliary_Functions import *
-from Boundary_Conditions import WallBoundary
 
 from sys import exit
-#import matplotlib.pyplot as plt
 
 class BubbleMove:
     """Class constructor"""
@@ -88,8 +86,9 @@ class BubbleMove:
 
         #Prepare useful variables for stabilization
         self.h = CellDiameter(self.mesh)
-        self.n_mesh = FacetNormal(self.mesh)
-        self.h_avg  = (self.h('+') + self.h('-'))/2.0
+        if(self.stab_method == 'IP'):
+            self.n_mesh = FacetNormal(self.mesh)
+            self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
         #Define FE spaces
         self.V  = VectorFunctionSpace(self.mesh, "CG", self.deg + 1)
@@ -112,12 +111,11 @@ class BubbleMove:
         self.p_old    = Function(self.P)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
-        self.rho_old  = Function(self.Q)
-        self.mu_old   = Function(self.Q)
 
         #Define function and vector for plotting level-set and computing volume
         self.tmp = Function(self.Q)
         self.lev_set = np.empty_like(self.phi_old.vector().get_local())
+        self.rho_interp = Function(self.Q)
 
 
     """Set the proper initial condition"""
@@ -135,14 +133,12 @@ class BubbleMove:
                         A = center[0], B = center[1], r = radius, degree = 2)
         assert center[0] - radius > 0.0 and center[0] + radius < self.base and \
                center[1] - radius > 0.0 and center[1] + radius < self.height,\
-                "Initial condition of interface goes outside the domain"
+               "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
-        self.u_old.assign(interpolate(Constant((0.0,0.1)),self.V))
+        self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
         self.p_old.assign(interpolate(Constant(0.0),self.P))
         self.phi_old.assign(interpolate(f,self.Q))
-        self.rho_old.assign(project(self.rho(self.phi_old, self.eps), self.Q))
-        self.mu_old.assign(project(self.mu(self.phi_old, self.eps), self.Q))
 
         #Compute normal vector to the interface
         #self.grad_phi = project(grad(self.phi_old), self.Q2)
@@ -157,12 +153,12 @@ class BubbleMove:
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return self.rho2*CHeaviside(x,eps) + self.rho1*(1.0 - CHeaviside(x,eps))
+        return CHeaviside(x,eps) + self.rho1_rho2*(1.0 - CHeaviside(x,eps))
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return self.mu2*CHeaviside(x,eps) + self.mu1*(1.0 - CHeaviside(x,eps))
+        return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
 
 
     """Interior penalty method"""
@@ -174,11 +170,11 @@ class BubbleMove:
 
     """Weak formulation for Navier-Stokes"""
     def ICS_weak_form_1(self):
-        F1 = inner(self.rho_old*(self.u - self.u_old)/self.DT, self.v)*dx  \
-           + inner(self.rho_old*(grad(self.u)*self.u_old), self.v)*dx \
-           + 2.0*inner(self.mu_old*D(self.u), D(self.v))*dx \
+        F1 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx  \
+           - inner(dot(grad(self.v),self.u_old), self.rho(self.phi_curr,self.eps)*self.u)*dx \
+           + 2.0/self.Re*inner(self.rho(self.phi_curr,self.eps)*D(self.u), grad(self.v))*dx \
            - self.p_old*div(self.v)*dx \
-           + 0.98*inner(self.rho_old*self.e2, self.v)*dx \
+           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
            #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -190,18 +186,18 @@ class BubbleMove:
 
     def ICS_weak_form_2(self):
         #Define variational problem for step 2
-        self.a1_bis = inner(grad(self.p), grad(self.q))*dx
-        self.L1_bis = inner(grad(self.p_old), grad(self.q))*dx - \
-                      (1.0/self.DT)*div(self.rho_old*self.u_curr)*self.q*dx
+        self.a1_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p), grad(self.q))*dx
+        self.L1_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p_old), grad(self.q))*dx - \
+                      (1.0/self.DT)*div(self.u_curr)*self.q*dx
 
-        self.A1_bis = assemble(self.a1_bis)
+        self.A1_bis = Matrix()
         self.b1_bis = Vector()
 
     def ICS_weak_form_3(self):
         #Define variational problem for step 3
         self.a1_tris = inner(self.u, self.v)*dx
         self.L1_tris = inner(self.u_curr, self.v)*dx - \
-                       self.DT*inner(grad(self.p_curr - self.p_old), self.v)*dx
+                       self.DT*inner(grad(self.p_curr - self.p_old), self.v)/self.rho(self.phi_curr,self.eps)*dx
 
         self.A1_tris = assemble(self.a1_tris)
         self.b1_tris = Vector()
@@ -210,9 +206,9 @@ class BubbleMove:
     """Level-set weak formulation"""
     def LS_weak_form(self):
         F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
-           + inner(self.u_curr, grad(self.phi))*self.l*dx
+           + inner(self.u_old, grad(self.phi))*self.l*dx
 
-        F2 += self.IP(self.phi, self.l)
+        #F2 += self.IP(self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -224,13 +220,13 @@ class BubbleMove:
 
     """Set weak formulations"""
     def set_weak_forms(self):
-        #Set variational problem for step 1 (Navier-Stokes)
+        #Set variational problem for step 1 (Level-set)
+        self.LS_weak_form()
+
+        #Set variational problem for step 2 (Navier-Stokes)
         self.ICS_weak_form_1()
         self.ICS_weak_form_2()
         self.ICS_weak_form_3()
-
-        #Set variational problem for step 2 (Level-set)
-        self.LS_weak_form()
 
 
     """Build and solve the system for Navier-Stokes simulation"""
@@ -244,15 +240,16 @@ class BubbleMove:
         [bc.apply(self.b1) for bc in self.bcs]
 
         #Solve the first system
-        solve(self.A1, self.u_curr.vector(), self.b1, 'bicgstab', 'hypre_amg')
+        solve(self.A1, self.u_curr.vector(), self.b1)
 
         #Assemble and solve the second system
+        assemble(self.a1_bis, tensor = self.A1_bis)
         assemble(self.L1_bis, tensor = self.b1_bis)
-        solve(self.A1_bis, self.p_curr.vector(), self.b1_bis, 'cg', 'sor')
+        solve(self.A1_bis, self.p_curr.vector(), self.b1_bis)
 
         #Assemble and solve the third system
         assemble(self.L1_tris, tensor = self.b1_tris)
-        solve(self.A1_tris, self.u_curr.vector(), self.b1_tris, 'cg', 'sor')
+        solve(self.A1_tris, self.u_curr.vector(), self.b1_tris)
 
 
     """Build the system for Level set simulation"""
@@ -262,7 +259,7 @@ class BubbleMove:
         assemble(self.L2, tensor = self.b2)
 
         #Solve the level-set system
-        solve(self.A2, self.phi_curr.vector(), self.b2)
+        solve(self.A2, self.phi_curr.vector(), self.b2, "gmres", "default")
 
         #Compute normal vector (in case we avoid reconstrution)
         #self.grad_phi.assign(project(grad(self.phi_curr), self.Q2))
@@ -282,13 +279,10 @@ class BubbleMove:
 
         #Plot the function just computed
         if(self.n_iter % 50 == 0):
-            plot(self.tmp, interactive = False, scalarbar = True)
-            #fig = plot(self.tmp, interactive = False, scalarbar = True)
-            #plt.colorbar(fig)
-            #plt.show()
-            self.vtkfile_phi_draw << (self.tmp, self.t)
-            self.vtkfile_u << (self.u_curr, self.t)
-            self.vtkfile_rho << (self.rho_old, self.t)
+            self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
+            self.vtkfile_u << (self.u_curr, self.t*self.t0)
+            self.rho_interp.assign(project(self.rho(self.phi_curr,self.eps), self.Q))
+            self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
@@ -313,27 +307,37 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim41/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim41/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim41/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim67/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim67/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim67/rho.pvd')
         while self.t <= self.t_end:
-            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t) + " s")
-
-            #Solve Navier-Stokes
-            begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
-            self.solve_Standard_NS_system()
-            end()
+            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
             #Solve level-set
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
             self.solve_Levelset_system()
             end()
 
+            #Solve Level-set reinit
+            """
+            try:
+                begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
+                self.Levelset_reinit()
+                end()
+            except RuntimeError as e:
+                print(e)
+                print("Aborting simulation...")
+                exit(1)
+            """
+            #Solve Navier-Stokes
+            begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
+            self.solve_Standard_NS_system()
+            end()
+
             #Prepare to next step assign previous-step solution
             self.u_old.assign(self.u_curr)
+            self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
-            self.rho_old.assign(project(self.rho(self.phi_old,self.eps),self.Q))
-            self.mu_old.assign(project(self.mu(self.phi_old,self.eps), self.Q))
 
             #Save and compute volume
             begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
