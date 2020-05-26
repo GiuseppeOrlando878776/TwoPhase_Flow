@@ -48,6 +48,19 @@ class BubbleMove:
         self.eps = self.Param["Interface_Thickness"]
         self.alpha = self.Param["Stabilization_Parameter"]
 
+        #Check correctness of reinitialization method (in order to avoid typos in particular
+        #since, contrarly to stabilization, it is more difficult to think to other choises)
+        #through auxiliary functions which can be eaily updated in future if needed
+        try:
+            self.switcher_reinit_weak_form = {'Non_Conservative':self.NCLSM_weak_form, 'Conservative':self.CLSM_weak_form}
+            self.switcher_reinit_solver    = {'Non_Conservative':self.NC_Levelset_reinit, \
+                                              'Conservative':self.C_Levelset_reinit}
+        except NameError as e:
+            print("Reinitialization method " + str(e).split("'")[1] + " declared but not implemented")
+            exit(1)
+        assert self.reinit_method in self.switcher_reinit_weak_form and self.switcher_reinit_solver, \
+               "Reinitialization method not available"
+
         #Compute the Atwood number according to the configuration file
         self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
 
@@ -95,16 +108,20 @@ class BubbleMove:
 
         #Parameters for reinitialization steps
         hmin = self.mesh.hmin()
-        self.eps_reinit = Constant(hmin)
-        self.alpha_reinit = Constant(0.0625*hmin)
-        self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
-                                                                #and so a very small step is needed
+        if(self.reinit_method == 'Non_Conservative'):
+            self.eps_reinit = Constant(hmin)
+            self.alpha_reinit = Constant(0.0625*hmin)
+            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                    #and so a very small step is needed
+        elif(self.reinit_method == 'Conservative'):
+            self.dt_reinit = Constant(0.5*hmin**(1.1))
+            self.eps_reinit = Constant(0.5*hmin**(0.9))
 
         #Define FE spaces
         self.V  = VectorFunctionSpace(self.mesh, "CG", self.deg + 1)
         self.P  = FunctionSpace(self.mesh, "CG" if self.deg > 0 else "DG", self.deg)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
-        #self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         self.u   = TrialFunction(self.V)
@@ -121,6 +138,9 @@ class BubbleMove:
         self.p_old    = Function(self.P)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
+
+        #Define function to store the normal
+        self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
@@ -210,11 +230,19 @@ class BubbleMove:
         self.b1_reinit = Vector()
 
 
+    """Weak form conservative reinitialization"""
+    def CLSM_weak_form(self):
+        #Save variational formulation
+        self.F1_reinit = (self.phi_intermediate - self.phi0)/self.dt_reinit*self.l*dx \
+                       - self.phi_intermediate*(1.0 - self.phi_intermediate)*inner(grad(self.l), self.n)*dx \
+                       + self.eps_reinit*inner(grad(self.phi_intermediate), grad(self.l))*dx
+
+
     """Weak formulation for tentative velocity"""
     def ICT_weak_form_1(self):
         F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx  \
            + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
-           + 2.0/self.Re*inner(self.rho(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
+           + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p_old*div(self.v)*dx \
            + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
            #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
@@ -253,7 +281,7 @@ class BubbleMove:
         self.LS_weak_form()
 
         #Set variational problem for reinitialization after step 1
-        self.NCLSM_weak_form()
+        self.switcher_reinit_weak_form[self.reinit_method]()
 
         #Set variational problem for step 2 (Navier-Stokes)
         self.ICT_weak_form_1()
@@ -271,12 +299,12 @@ class BubbleMove:
         solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "default")
 
         #Compute normal vector (in case we avoid reconstrution)
-        #self.grad_phi.assign(project(grad(self.phi_curr), self.Q2))
-        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        grad_phi = grad(self.phi_curr)
+        self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
 
 
-    """Build and solve the system for Level set reinitialization"""
-    def Levelset_reinit(self):
+    """Build and solve the system for Level set reinitialization (non-conservative)"""
+    def NC_Levelset_reinit(self):
         #Assign current solution
         self.phi0.assign(self.phi_curr)
 
@@ -284,7 +312,7 @@ class BubbleMove:
         for n in range(10):
             #Assemble and solve the system
             assemble(self.L1_reinit, tensor = self.b1_reinit)
-            solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg", "default")
+            solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "default")
 
             #Compute the error and check no divergence
             error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
@@ -301,8 +329,33 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        #self.grad_phi.assign(project(grad(self.phi_curr), self.Q2))
-        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+        #grad_phi = grad(self.phi_curr)
+        #self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
+
+
+    """Build and solve the system for Level set reinitialization (conservative)"""
+    def C_Levelset_reinit(self):
+        #Assign current solution
+        self.phi0.assign(self.phi_curr)
+
+        for n in range(10):
+            #Solve the system
+            solve(self.F1_reinit == 0, self.phi_intermediate, \
+                  solver_parameters={"newton_solver": {'linear_solver': 'bicgstab', "preconditioner": "default"}}, \
+                  form_compiler_parameters={"optimize": True})
+
+            #Check if convergence has been reached
+            if(norm(assemble(self.F1_reinit), "L2") < 1e-3):
+                break
+
+            #Set previous step solution
+            self.phi0.assign(self.phi_intermediate)
+
+        #Assign the reinitialized level-set to the current solution and
+        #update normal vector to the interface (for Navier-Stokes)
+        self.phi_curr.assign(self.phi_intermediate)
+        grad_phi = grad(self.phi_curr)
+        self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
 
 
     """Build and solve the system for Navier-Stokes simulation"""
@@ -369,9 +422,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim70/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim70/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim70/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim71/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim71/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim71/rho.pvd')
         self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
@@ -384,7 +437,7 @@ class BubbleMove:
             #Solve Level-set reinit
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                self.Levelset_reinit()
+                self.switcher_reinit_solver[self.reinit_method]()
                 end()
             except RuntimeError as e:
                 print(e)
