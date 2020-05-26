@@ -245,7 +245,8 @@ class BubbleMove:
            + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p_old*div(self.v)*dx \
            + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
-           #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+           + 1.0/(self.Bo*self.At)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+             inner(Identity(2) - outer(self.n, self.n), grad(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -309,7 +310,7 @@ class BubbleMove:
         self.phi0.assign(self.phi_curr)
 
         E_old = 1e10
-        for n in range(10):
+        for n in range(4):
             #Assemble and solve the system
             assemble(self.L1_reinit, tensor = self.b1_reinit)
             solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "default")
@@ -329,8 +330,8 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        #grad_phi = grad(self.phi_curr)
-        #self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
+        grad_phi = grad(self.phi_curr)
+        self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
