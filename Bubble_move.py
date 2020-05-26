@@ -12,6 +12,9 @@ class BubbleMove:
         At    --- Atwood number
         Bo    --- Bond number
         rho1  --- Lighter density
+        rho2  --- Heavier density
+        mu1   --- Smaller viscosity
+        mu2   --- Larger viscosity
         dt    --- Specified time step
         t_end --- End time of the simulation
         deg   --- Polynomial degree
@@ -90,6 +93,13 @@ class BubbleMove:
             self.n_mesh = FacetNormal(self.mesh)
             self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
+        #Parameters for reinitialization steps
+        hmin = self.mesh.hmin()
+        self.eps_reinit = Constant(hmin)
+        self.alpha_reinit = Constant(0.0625*hmin)
+        self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                #and so a very small step is needed
+
         #Define FE spaces
         self.V  = VectorFunctionSpace(self.mesh, "CG", self.deg + 1)
         self.P  = FunctionSpace(self.mesh, "CG" if self.deg > 0 else "DG", self.deg)
@@ -111,6 +121,11 @@ class BubbleMove:
         self.p_old    = Function(self.P)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
+
+        #Define useful functions for reinitialization
+        self.phi0 = Function(self.Q)
+        self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
+                                                 #reinitialization and it is also useful for clearness
 
         #Define function and vector for plotting level-set and computing volume
         self.tmp = Function(self.Q)
@@ -168,14 +183,12 @@ class BubbleMove:
         return r
 
 
-    """Weak formulation for Navier-Stokes"""
-    def ICS_weak_form_1(self):
-        F1 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx  \
-           - inner(dot(grad(self.v),self.u_old), self.rho(self.phi_curr,self.eps)*self.u)*dx \
-           + 2.0/self.Re*inner(self.rho(self.phi_curr,self.eps)*D(self.u), grad(self.v))*dx \
-           - self.p_old*div(self.v)*dx \
-           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
-           #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
+    """Level-set weak formulation"""
+    def LS_weak_form(self):
+        F1 = (self.phi - self.phi_old)/self.DT*self.l*dx \
+           + inner(self.u_old, grad(self.phi))*self.l*dx
+
+        F1 += self.IP(self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -184,31 +197,27 @@ class BubbleMove:
         self.A1 = Matrix()
         self.b1 = Vector()
 
-    def ICS_weak_form_2(self):
-        #Define variational problem for step 2
-        self.a1_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p), grad(self.q))*dx
-        self.L1_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p_old), grad(self.q))*dx - \
-                      (1.0/self.DT)*div(self.u_curr)*self.q*dx
 
-        self.A1_bis = Matrix()
-        self.b1_bis = Vector()
+    """Weak form non-conservative reinitialization"""
+    def NCLSM_weak_form(self):
+        self.a1_reinit = self.phi/self.dt_reinit*self.l*dx
+        self.L1_reinit = self.phi0/self.dt_reinit*self.l*dx + \
+                         signp(self.phi_curr, self.eps_reinit)*(1.0 - mgrad(self.phi0))*self.l*dx -\
+                         self.alpha_reinit*inner(grad(self.phi0), grad(self.l))*dx
 
-    def ICS_weak_form_3(self):
-        #Define variational problem for step 3
-        self.a1_tris = inner(self.u, self.v)*dx
-        self.L1_tris = inner(self.u_curr, self.v)*dx - \
-                       self.DT*inner(grad(self.p_curr - self.p_old), self.v)/self.rho(self.phi_curr,self.eps)*dx
-
-        self.A1_tris = assemble(self.a1_tris)
-        self.b1_tris = Vector()
+        #Save the matrix that will not change and declare vector
+        self.A1_reinit = assemble(self.a1_reinit)
+        self.b1_reinit = Vector()
 
 
-    """Level-set weak formulation"""
-    def LS_weak_form(self):
-        F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
-           + inner(self.u_old, grad(self.phi))*self.l*dx
-
-        F2 += self.IP(self.phi, self.l)
+    """Weak formulation for tentative velocity"""
+    def ICT_weak_form_1(self):
+        F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx  \
+           + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
+           + 2.0/self.Re*inner(self.rho(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
+           - self.p_old*div(self.v)*dx \
+           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
+           #+ 1.0/(self.Bo*self.At)*div(self.n)*inner(self.n, self.v)*CDelta(self.phi_old, self.eps)*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -217,62 +226,115 @@ class BubbleMove:
         self.A2 = Matrix()
         self.b2 = Vector()
 
+    """Weak formulation for pressure correction"""
+    def ICT_weak_form_2(self):
+        #Define variational problem for step 2
+        self.a2_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p), grad(self.q))*dx
+        self.L2_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p_old), grad(self.q))*dx - \
+                      (1.0/self.DT)*div(self.u_curr)*self.q*dx
+
+        self.A2_bis = Matrix()
+        self.b2_bis = Vector()
+
+    """Weak formulation for velocity projection"""
+    def ICT_weak_form_3(self):
+        #Define variational problem for step 3
+        self.a2_tris = inner(self.u, self.v)*dx
+        self.L2_tris = inner(self.u_curr, self.v)*dx - \
+                       self.DT*inner(grad(self.p_curr - self.p_old), self.v)/self.rho(self.phi_curr,self.eps)*dx
+
+        self.A2_tris = assemble(self.a2_tris)
+        self.b2_tris = Vector()
+
 
     """Set weak formulations"""
     def set_weak_forms(self):
         #Set variational problem for step 1 (Level-set)
         self.LS_weak_form()
 
+        #Set variational problem for reinitialization after step 1
+        self.NCLSM_weak_form()
+
         #Set variational problem for step 2 (Navier-Stokes)
-        self.ICS_weak_form_1()
-        self.ICS_weak_form_2()
-        self.ICS_weak_form_3()
-
-
-    """Build and solve the system for Navier-Stokes simulation"""
-    def solve_Standard_NS_system(self):
-        #Assemble matrices
-        assemble(self.a1, tensor = self.A1)
-        assemble(self.L1, tensor = self.b1)
-
-        #Apply boundary conditions
-        [bc.apply(self.A1) for bc in self.bcs]
-        [bc.apply(self.b1) for bc in self.bcs]
-
-        #Solve the first system
-        solve(self.A1, self.u_curr.vector(), self.b1, "bicgstab", "default")
-
-        #Assemble and solve the second system
-        assemble(self.a1_bis, tensor = self.A1_bis)
-        assemble(self.L1_bis, tensor = self.b1_bis)
-        solve(self.A1_bis, self.p_curr.vector(), self.b1_bis, "bicgstab", "default")
-
-        #Assemble and solve the third system
-        assemble(self.L1_tris, tensor = self.b1_tris)
-        solve(self.A1_tris, self.u_curr.vector(), self.b1_tris, "cg", "default")
+        self.ICT_weak_form_1()
+        self.ICT_weak_form_2()
+        self.ICT_weak_form_3()
 
 
     """Build the system for Level set simulation"""
     def solve_Levelset_system(self):
         # Assemble matrix and right-hand side
-        assemble(self.a2, tensor = self.A2)
-        assemble(self.L2, tensor = self.b2)
+        assemble(self.a1, tensor = self.A1)
+        assemble(self.L1, tensor = self.b1)
 
         #Solve the level-set system
-        solve(self.A2, self.phi_curr.vector(), self.b2, "gmres", "default")
+        solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "default")
 
         #Compute normal vector (in case we avoid reconstrution)
         #self.grad_phi.assign(project(grad(self.phi_curr), self.Q2))
         #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
 
 
+    """Build and solve the system for Level set reinitialization"""
+    def Levelset_reinit(self):
+        #Assign current solution
+        self.phi0.assign(self.phi_curr)
+
+        E_old = 1e10
+        for n in range(10):
+            #Assemble and solve the system
+            assemble(self.L1_reinit, tensor = self.b1_reinit)
+            solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg", "default")
+
+            #Compute the error and check no divergence
+            error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
+            E = sqrt(abs(assemble(error)))
+
+            if(E_old < E):
+                raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
+            elif(E < 1e-3):
+                break
+
+            #Set previous step solution
+            self.phi0.assign(self.phi_intermediate)
+
+        #Assign the reinitialized level-set to the current solution and
+        #update normal vector to the interface (for Navier-Stokes)
+        self.phi_curr.assign(self.phi_intermediate)
+        #self.grad_phi.assign(project(grad(self.phi_curr), self.Q2))
+        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
+
+
+    """Build and solve the system for Navier-Stokes simulation"""
+    def solve_Standard_NS_system(self):
+        #Assemble matrices
+        assemble(self.a2, tensor = self.A2)
+        assemble(self.L2, tensor = self.b2)
+
+        #Apply boundary conditions
+        [bc.apply(self.A2) for bc in self.bcs]
+        [bc.apply(self.b2) for bc in self.bcs]
+
+        #Solve the first system
+        solve(self.A2, self.u_curr.vector(), self.b2, "bicgstab", "default")
+
+        #Assemble and solve the second system
+        assemble(self.a2_bis, tensor = self.A2_bis)
+        assemble(self.L2_bis, tensor = self.b2_bis)
+        solve(self.A2_bis, self.p_curr.vector(), self.b2_bis, "bicgstab", "default")
+
+        #Assemble and solve the third system
+        assemble(self.L2_tris, tensor = self.b2_tris)
+        solve(self.A2_tris, self.u_curr.vector(), self.b2_tris, "cg", "default")
+
+
     """Plot the level-set function and compute the volume"""
     def plot_and_volume(self):
         #Extract vector for FE function
-        self.phi_curr_vec = self.phi_curr.vector().get_local()
+        phi_old_vec = self.phi_old.vector().get_local()
 
         #Construct vector of ones inside the bubble
-        self.lev_set = 1.0*(self.phi_curr_vec < 0.0)
+        self.lev_set = 1.0*(phi_old_vec < 0.0)
 
         #Assign vector to FE function
         self.tmp.vector().set_local(self.lev_set)
@@ -280,8 +342,8 @@ class BubbleMove:
         #Plot the function just computed
         if(self.n_iter % 50 == 0):
             self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
-            self.vtkfile_u << (self.u_curr, self.t*self.t0)
-            self.rho_interp.assign(project(self.rho(self.phi_curr,self.eps), self.Q))
+            self.vtkfile_u << (self.u_old, self.t*self.t0)
+            self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
 
         #Check volume consistency
@@ -307,9 +369,10 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim69/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim69/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim69/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim70/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim70/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim70/rho.pvd')
+        self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
@@ -319,7 +382,6 @@ class BubbleMove:
             end()
 
             #Solve Level-set reinit
-            """
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                 self.Levelset_reinit()
@@ -328,7 +390,7 @@ class BubbleMove:
                 print(e)
                 print("Aborting simulation...")
                 exit(1)
-            """
+
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
             self.solve_Standard_NS_system()
