@@ -208,7 +208,7 @@ class BubbleMove:
         F2 = (self.phi - self.phi_old)/self.DT*self.l*dx \
            + inner(self.u_old, grad(self.phi))*self.l*dx
 
-        #F2 += self.IP(self.phi, self.l)
+        F2 += self.IP(self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -240,16 +240,16 @@ class BubbleMove:
         [bc.apply(self.b1) for bc in self.bcs]
 
         #Solve the first system
-        solve(self.A1, self.u_curr.vector(), self.b1)
+        solve(self.A1, self.u_curr.vector(), self.b1, "bicgstab", "default")
 
         #Assemble and solve the second system
         assemble(self.a1_bis, tensor = self.A1_bis)
         assemble(self.L1_bis, tensor = self.b1_bis)
-        solve(self.A1_bis, self.p_curr.vector(), self.b1_bis)
+        solve(self.A1_bis, self.p_curr.vector(), self.b1_bis, "bicgstab", "default")
 
         #Assemble and solve the third system
         assemble(self.L1_tris, tensor = self.b1_tris)
-        solve(self.A1_tris, self.u_curr.vector(), self.b1_tris)
+        solve(self.A1_tris, self.u_curr.vector(), self.b1_tris, "cg", "default")
 
 
     """Build the system for Level set simulation"""
@@ -307,9 +307,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim67/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim67/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim67/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim69/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim69/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim69/rho.pvd')
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
