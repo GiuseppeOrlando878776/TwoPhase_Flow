@@ -270,12 +270,15 @@ class BubbleMove:
     """Weak form conservative reinitialization"""
     def CLSM_weak_form(self):
         #Save variational formulation
-        self.a1_reinit = inner(grad(self.phi), grad(self.l))*dx \
-                       + 1.0e2*CDelta(self.phi_curr, self.eps)*self.phi*self.l*dx
-        self.L1_reinit = inner(grad(self.phi0)/mgrad(self.phi0), grad(self.l))*dx
+        F1_reinit = (self.phi - self.phi0)/0.0001*self.l*dx \
+                  + inner(grad(self.phi_0), grad(self.l))*dx \
+                  - inner(grad(self.phi_0)/mgrad(self.phi_0), grad(self.l))*dx
 
-        #Save the matrix that will not change and declare vector
-        self.A1_reinit = assemble(self.a1_reinit)
+        self.a1_reinit = lhs(self.F1_reinit)
+        self.L1_reinit = rhs(self.F1_reinit)
+
+        #Save matrix that does not change and declar vector
+        self.a1_reinit = assemble(self.a1_reinit)
         self.b1_reinit = Vector()
 
 
@@ -379,7 +382,7 @@ class BubbleMove:
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        for n in range(50):
+        for n in range(10):
             #Construct the new right-hand side
             assemble(self.L1_reinit, tensor = self.b1_reinit)
 
@@ -387,9 +390,9 @@ class BubbleMove:
             solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg", "icc")
 
             #Check difference iterates
-            error = (((self.phi_intermediate - self.phi0))**2)*dx
+            error = (((self.phi_intermediate - self.phi0)/0.0001)**2)*dx
             E = sqrt(abs(assemble(error)))
-            if(E < 1e-6):
+            if(E < 1e-3):
                 break
 
             #Prepare for next iteration
