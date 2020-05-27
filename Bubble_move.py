@@ -48,6 +48,15 @@ class BubbleMove:
         self.eps = self.Param["Interface_Thickness"]
         self.alpha = self.Param["Stabilization_Parameter"]
 
+        #Define an auxiliary dictionary to set proper stabilization
+        try:
+            self.switcher_stab = {'IP':self.IP, 'SUPG':self.SUPG, 'None':self.no_stab}
+        except NameError as e:
+            print("Stabilization method " + str(e).split("'")[1] + " declared but not implemented")
+            exit(1)
+        assert self.stab_method in self.switcher_stab, \
+               "Stabilization method not available"
+
         #Check correctness of reinitialization method (in order to avoid typos in particular
         #since, contrarly to stabilization, it is more difficult to think to other choises)
         #through auxiliary functions which can be eaily updated in future if needed
@@ -196,6 +205,11 @@ class BubbleMove:
         return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
 
 
+    """No stabilization"""
+    def no_stab(self, phi, l):
+        return 0.0
+
+
     """Interior penalty method"""
     def IP(self, phi, l):
         r = self.alpha*self.h_avg*self.h_avg* \
@@ -203,12 +217,35 @@ class BubbleMove:
         return r
 
 
+    """SUPG method"""
+    def SUPG(self, phi, l):
+        r = ((phi - self.phi_old)/self.DT + inner(self.u_old, grad(phi)))* \
+            self.alpha*self.h/ufl.Max(2.0*sqrt(inner(self.u_old,self.u_old)), 4.0/(self.Re*self.h))*\
+            inner(self.u_old,self.u_old)*inner(self.u_old, grad(l))*dx
+        return r
+
+
+    def IP(self, phi, l):
+        r = self.alpha*self.h_avg*self.h_avg* \
+            inner(jump(grad(phi),self.n_mesh), jump(grad(l),self.n_mesh))*dS
+        return r
+
+
+    """SUPG method"""
+    def SUPG(self, phi, l):
+        r = ((phi - self.phi_old)/self.DT + inner(self.u_old, grad(phi)))* \
+            self.alpha*self.h/ufl.Max(2.0*sqrt(inner(self.u_old,self.u_old)), 4.0/(self.Re*self.h))*\
+            inner(self.u_old,self.u_old)*inner(self.u_old, grad(l))*dx
+        return r
+
+
+
     """Level-set weak formulation"""
     def LS_weak_form(self):
         F1 = (self.phi - self.phi_old)/self.DT*self.l*dx \
            + inner(self.u_old, grad(self.phi))*self.l*dx
 
-        F1 += self.IP(self.phi, self.l)
+        F1 += self.switcher_stab[self.stab_method](self.phi, self.l)
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a1 = lhs(F1)
@@ -423,9 +460,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim71/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim71/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim71/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim73/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim73/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim73/rho.pvd')
         self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
