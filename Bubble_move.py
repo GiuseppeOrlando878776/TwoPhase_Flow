@@ -270,9 +270,13 @@ class BubbleMove:
     """Weak form conservative reinitialization"""
     def CLSM_weak_form(self):
         #Save variational formulation
-        self.F1_reinit = (self.phi_intermediate - self.phi0)/self.dt_reinit*self.l*dx \
-                       - self.phi_intermediate*(1.0 - self.phi_intermediate)*inner(grad(self.l), self.n)*dx \
-                       + self.eps_reinit*inner(grad(self.phi_intermediate), grad(self.l))*dx
+        self.a1_reinit = inner(grad(self.phi), grad(self.l))*dx \
+                       + 1.0e2*CDelta(self.phi_curr, self.eps)*self.phi*self.l*dx
+        self.L1_reinit = inner(grad(self.phi0)/mgrad(self.phi0), grad(self.l))*dx
+
+        #Save the matrix that will not change and declare vector
+        self.A1_reinit = assemble(self.a1_reinit)
+        self.b1_reinit = Vector()
 
 
     """Weak formulation for tentative velocity"""
@@ -334,7 +338,7 @@ class BubbleMove:
         assemble(self.L1, tensor = self.b1)
 
         #Solve the level-set system
-        solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "default")
+        solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "hypre_amg")
 
         #Compute normal vector (in case we avoid reconstrution)
         grad_phi = grad(self.phi_curr)
@@ -350,7 +354,7 @@ class BubbleMove:
         for n in range(4):
             #Assemble and solve the system
             assemble(self.L1_reinit, tensor = self.b1_reinit)
-            solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "default")
+            solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "icc")
 
             #Compute the error and check no divergence
             error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
@@ -373,20 +377,22 @@ class BubbleMove:
 
     """Build and solve the system for Level set reinitialization (conservative)"""
     def C_Levelset_reinit(self):
-        #Assign current solution
         self.phi0.assign(self.phi_curr)
 
-        for n in range(10):
-            #Solve the system
-            solve(self.F1_reinit == 0, self.phi_intermediate, \
-                  solver_parameters={"newton_solver": {'linear_solver': 'bicgstab', "preconditioner": "default"}}, \
-                  form_compiler_parameters={"optimize": True})
+        for n in range(50):
+            #Construct the new right-hand side
+            assemble(self.L1_reinit, tensor = self.b1_reinit)
 
-            #Check if convergence has been reached
-            if(norm(assemble(self.F1_reinit), "L2") < 1e-3):
+            #Solve the system
+            solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg", "icc")
+
+            #Check difference iterates
+            error = (((self.phi_intermediate - self.phi0))**2)*dx
+            E = sqrt(abs(assemble(error)))
+            if(E < 1e-6):
                 break
 
-            #Set previous step solution
+            #Prepare for next iteration
             self.phi0.assign(self.phi_intermediate)
 
         #Assign the reinitialized level-set to the current solution and
@@ -407,16 +413,16 @@ class BubbleMove:
         [bc.apply(self.b2) for bc in self.bcs]
 
         #Solve the first system
-        solve(self.A2, self.u_curr.vector(), self.b2, "bicgstab", "default")
+        solve(self.A2, self.u_curr.vector(), self.b2, "bicgstab", "hypre_amg")
 
         #Assemble and solve the second system
         assemble(self.a2_bis, tensor = self.A2_bis)
         assemble(self.L2_bis, tensor = self.b2_bis)
-        solve(self.A2_bis, self.p_curr.vector(), self.b2_bis, "bicgstab", "default")
+        solve(self.A2_bis, self.p_curr.vector(), self.b2_bis, "bicgstab", "hypre_amg")
 
         #Assemble and solve the third system
         assemble(self.L2_tris, tensor = self.b2_tris)
-        solve(self.A2_tris, self.u_curr.vector(), self.b2_tris, "cg", "default")
+        solve(self.A2_tris, self.u_curr.vector(), self.b2_tris, "cg", "icc")
 
 
     """Plot the level-set function and compute the volume"""
@@ -460,9 +466,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim73/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim73/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim73/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim74/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim74/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim74/rho.pvd')
         self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
