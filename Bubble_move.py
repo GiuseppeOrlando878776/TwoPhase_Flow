@@ -270,16 +270,9 @@ class BubbleMove:
     """Weak form conservative reinitialization"""
     def CLSM_weak_form(self):
         #Save variational formulation
-        F1_reinit = (self.phi - self.phi0)/0.0001*self.l*dx \
-                  + inner(grad(self.phi_0), grad(self.l))*dx \
-                  - inner(grad(self.phi_0)/mgrad(self.phi_0), grad(self.l))*dx
-
-        self.a1_reinit = lhs(self.F1_reinit)
-        self.L1_reinit = rhs(self.F1_reinit)
-
-        #Save matrix that does not change and declar vector
-        self.a1_reinit = assemble(self.a1_reinit)
-        self.b1_reinit = Vector()
+        self.F1_reinit = (self.phi_intermediate - self.phi0)/0.000001*self.l*dx \
+                       - self.phi_intermediate*(1.0 - self.phi_intermediate)*inner(grad(self.l), self.n)*dx \
+                       + self.eps_reinit*inner(grad(self.phi_intermediate), self.n)*inner(grad(self.l), self.n)*dx
 
 
     """Weak formulation for tentative velocity"""
@@ -382,17 +375,14 @@ class BubbleMove:
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        for n in range(10):
-            #Construct the new right-hand side
-            assemble(self.L1_reinit, tensor = self.b1_reinit)
-
+        for n in range(4):
             #Solve the system
-            solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg", "icc")
+            solve(self.F1_reinit == 0, self.phi_intermediate, \
+                  solver_parameters={"newton_solver": {'linear_solver': 'bicgstab', "preconditioner": "hypre_amg"}}, \
+                  form_compiler_parameters={"optimize": True})
 
-            #Check difference iterates
-            error = (((self.phi_intermediate - self.phi0)/0.0001)**2)*dx
-            E = sqrt(abs(assemble(error)))
-            if(E < 1e-3):
+            #Check if convergence has been reached
+            if(norm(assemble(self.F1_reinit), "L2") < 1e-3):
                 break
 
             #Prepare for next iteration
