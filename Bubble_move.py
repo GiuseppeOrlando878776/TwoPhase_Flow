@@ -172,9 +172,7 @@ class BubbleMove:
             print(str(e) +  "\nPlease check configuration file")
             exit(1)
 
-        #Set initial condition of bubble and check geoemtric limits
-        f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
-                        A = center[0], B = center[1], r = radius, degree = 2)
+        #Check geoemtric limits
         assert center[0] - radius > 0.0 and center[0] + radius < self.base and \
                center[1] - radius > 0.0 and center[1] + radius < self.height,\
                "Initial condition of interface goes outside the domain"
@@ -182,7 +180,14 @@ class BubbleMove:
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
         self.p_old.assign(interpolate(Constant(0.0),self.P))
-        self.phi_old.assign(interpolate(f,self.Q))
+        if(self.reinit_method == 'Non_Conservative'):
+            f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
+                            A = center[0], B = center[1], r = radius, degree = 2)
+            self.phi_old.assign(interpolate(f,self.Q))
+        elif(self.reinit_method == 'Conservative'):
+            f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
+                            A = center[0], B = center[1], r = radius, eps = self.eps_reinit, degree = 2)
+            self.phi_old.assign(interpolate(f, self.Q))
 
         #Compute normal vector to the interface
         #self.grad_phi = project(grad(self.phi_old), self.Q2)
@@ -225,21 +230,6 @@ class BubbleMove:
         return r
 
 
-    def IP(self, phi, l):
-        r = self.alpha*self.h_avg*self.h_avg* \
-            inner(jump(grad(phi),self.n_mesh), jump(grad(l),self.n_mesh))*dS
-        return r
-
-
-    """SUPG method"""
-    def SUPG(self, phi, l):
-        r = ((phi - self.phi_old)/self.DT + inner(self.u_old, grad(phi)))* \
-            self.alpha*self.h/ufl.Max(2.0*sqrt(inner(self.u_old,self.u_old)), 4.0/(self.Re*self.h))*\
-            inner(self.u_old,self.u_old)*inner(self.u_old, grad(l))*dx
-        return r
-
-
-
     """Level-set weak formulation"""
     def LS_weak_form(self):
         F1 = (self.phi - self.phi_old)/self.DT*self.l*dx \
@@ -270,7 +260,7 @@ class BubbleMove:
     """Weak form conservative reinitialization"""
     def CLSM_weak_form(self):
         #Save variational formulation
-        self.F1_reinit = (self.phi_intermediate - self.phi0)/0.000001*self.l*dx \
+        self.F1_reinit = (self.phi_intermediate - self.phi0)/self.dt_reinit*self.l*dx \
                        - self.phi_intermediate*(1.0 - self.phi_intermediate)*inner(grad(self.l), self.n)*dx \
                        + self.eps_reinit*inner(grad(self.phi_intermediate), self.n)*inner(grad(self.l), self.n)*dx
 
@@ -282,8 +272,8 @@ class BubbleMove:
            + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p_old*div(self.v)*dx \
            + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
-           + 1.0/(self.Bo*self.At)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-             inner(Identity(2) - outer(self.n, self.n), grad(self.v))*dx
+           + 1.0/(self.Bo*self.At)*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+             inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -375,7 +365,7 @@ class BubbleMove:
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        for n in range(4):
+        for n in range(10):
             #Solve the system
             solve(self.F1_reinit == 0, self.phi_intermediate, \
                   solver_parameters={"newton_solver": {'linear_solver': 'bicgstab', "preconditioner": "hypre_amg"}}, \
@@ -406,12 +396,12 @@ class BubbleMove:
         [bc.apply(self.b2) for bc in self.bcs]
 
         #Solve the first system
-        solve(self.A2, self.u_curr.vector(), self.b2, "bicgstab", "hypre_amg")
+        solve(self.A2, self.u_curr.vector(), self.b2, "bicgstab", "default")
 
         #Assemble and solve the second system
         assemble(self.a2_bis, tensor = self.A2_bis)
         assemble(self.L2_bis, tensor = self.b2_bis)
-        solve(self.A2_bis, self.p_curr.vector(), self.b2_bis, "bicgstab", "hypre_amg")
+        solve(self.A2_bis, self.p_curr.vector(), self.b2_bis, "bicgstab", "default")
 
         #Assemble and solve the third system
         assemble(self.L2_tris, tensor = self.b2_tris)
@@ -424,7 +414,10 @@ class BubbleMove:
         phi_old_vec = self.phi_old.vector().get_local()
 
         #Construct vector of ones inside the bubble
-        self.lev_set = 1.0*(phi_old_vec < 0.0)
+        if(self.reinit_method == 'Non_Conservative'):
+            self.lev_set = 1.0*(phi_old_vec < 0.0)
+        elif(self.reinit_method == 'Conservative'):
+            self.lev_set = 1.0*(phi_old_vec < 0.5)
 
         #Assign vector to FE function
         self.tmp.vector().set_local(self.lev_set)
@@ -459,9 +452,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim74/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim74/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim74/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim78/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim78/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim78/rho.pvd')
         self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
