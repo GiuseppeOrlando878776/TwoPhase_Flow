@@ -17,10 +17,12 @@ def signp(l, eps):
 
 """'Continuous Heaviside approximation'"""
 def CHeaviside(psi, eps):
-    #val = 0.5*(1.0 + psi/eps + 1/np.pi*sin(np.pi*psi/eps))
     return conditional(lt(abs(psi),eps), 0.5*(1.0 + psi/eps + 1/np.pi*sin(np.pi*psi/eps)), (ufl.sign(psi) + 1)/2.0)
 
 """'Continuous Dirac's delta approximation'"""
-def CDelta(psi, eps):
-    #val = 1.0/(2.0*eps)*(1.0 + cos(np.pi*psi/eps))
+def CDelta(psi, eps, method):
     return conditional(lt(abs(psi),eps), 1.0/(2.0*eps)*(1.0 + cos(np.pi*psi/eps)), 0.0)
+
+"""'Continuous Dirac's delta approximation'"""
+def CDelta_LS(psi, eps):
+    return 1.0/eps*(ufl.exp(-psi)/eps)/((ufl.exp(-psi)/eps + 1.0)**2)

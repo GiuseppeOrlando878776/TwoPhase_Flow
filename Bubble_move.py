@@ -189,10 +189,6 @@ class BubbleMove:
                             A = center[0], B = center[1], r = radius, eps = self.eps_reinit, degree = 2)
             self.phi_old.assign(interpolate(f, self.Q))
 
-        #Compute normal vector to the interface
-        #self.grad_phi = project(grad(self.phi_old), self.Q2)
-        #self.n = self.grad_phi/sqrt(inner(self.grad_phi, self.grad_phi))
-
 
     """Assemble boundary condition"""
     def assembleBC(self):
@@ -202,12 +198,18 @@ class BubbleMove:
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return CHeaviside(x,eps) + self.rho1_rho2*(1.0 - CHeaviside(x,eps))
+        if(self.reinit_method == 'Non_Conservative'):
+            return CHeaviside(x,eps) + self.rho1_rho2*(1.0 - CHeaviside(x,eps))
+        elif(self.reinit_method == 'Conservative'):
+            return x + self.rho1_rho2*(1.0 - x)
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
+        if(self.reinit_method == 'Non_Conservative'):
+            return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
+        elif(self.reinit_method == 'Conservative'):
+            return self.phi_curr + self.mu1_mu2*(1.0 - self.phi_curr)
 
 
     """No stabilization"""
@@ -272,8 +274,13 @@ class BubbleMove:
            + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p_old*div(self.v)*dx \
            + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
-           + 1.0/(self.Bo*self.At)*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-             inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+
+        if(self.reinit_method == 'Non_Conservative'):
+            F2 += 1.0/(self.Bo*self.At)*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+        elif(self.reinit_method == 'Conservative'):
+            F2 += 1.0/(self.Bo*self.At)*CDelta_LS(self.phi_curr, self.eps_reinit)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -365,14 +372,14 @@ class BubbleMove:
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        for n in range(10):
+        for n in range(50):
             #Solve the system
             solve(self.F1_reinit == 0, self.phi_intermediate, \
                   solver_parameters={"newton_solver": {'linear_solver': 'bicgstab', "preconditioner": "hypre_amg"}}, \
                   form_compiler_parameters={"optimize": True})
 
             #Check if convergence has been reached
-            if(norm(assemble(self.F1_reinit), "L2") < 1e-3):
+            if(norm(assemble(self.F1_reinit), "L2") < 1e-6):
                 break
 
             #Prepare for next iteration
