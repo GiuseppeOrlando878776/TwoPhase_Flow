@@ -48,6 +48,17 @@ class BubbleMove:
         self.eps = self.Param["Interface_Thickness"]
         self.alpha = self.Param["Stabilization_Parameter"]
 
+        #Define an auxiliary dictionary to set proper solution procedure for Navier-Stokes
+        try:
+            self.switcher_NS = {'Standard':self.solve_Standard_NS_system, \
+                                'ICT':self.solve_ICT_NS_systems}
+        except NameError as e:
+            print("Solution procedure for solving Navier-Stokes " + str(e).split("'")[1] + \
+                  " declared but not implemented")
+            exit(1)
+        assert self.NS_sol_method in self.switcher_NS, \
+               "Solution method for Navier-Stokes not available"
+
         #Define an auxiliary dictionary to set proper stabilization
         try:
             self.switcher_stab = {'IP':self.IP, 'SUPG':self.SUPG, 'None':self.no_stab}
@@ -130,14 +141,22 @@ class BubbleMove:
         #Define FE spaces
         self.V  = VectorFunctionSpace(self.mesh, "CG", self.deg + 1)
         self.P  = FunctionSpace(self.mesh, "CG" if self.deg > 0 else "DG", self.deg)
+        if(self.NS_sol_method == 'Standard'):
+            Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
+            Pelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
+            self.W  = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
-        self.u   = TrialFunction(self.V)
-        self.v   = TestFunction(self.V)
-        self.p   = TrialFunction(self.P)
-        self.q   = TestFunction(self.P)
+        if(self.NS_sol_method == 'Standard'):
+            (self.u, self.p) = TrialFunctions(self.W)
+            (self.v, self.q) = TestFunctions(self.W)
+        elif(self.NS_sol_method == 'ICT'):
+            self.u   = TrialFunction(self.V)
+            self.v   = TestFunction(self.V)
+            self.p   = TrialFunction(self.P)
+            self.q   = TestFunction(self.P)
         self.phi = TrialFunction(self.Q)
         self.l   = TestFunction(self.Q)
 
@@ -146,6 +165,9 @@ class BubbleMove:
         self.u_old    = Function(self.V)
         self.p_curr   = Function(self.P)
         self.p_old    = Function(self.P)
+        if(self.NS_sol_method == 'Standard'):
+            self.w_curr = Function(self.W)
+            self.w_old  = Function(self.W)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
 
@@ -181,6 +203,8 @@ class BubbleMove:
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
         self.p_old.assign(interpolate(Constant(0.0),self.P))
+        if(self.NS_sol_method == 'Standard'):
+            self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         if(self.reinit_method == 'Non_Conservative'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                             A = center[0], B = center[1], r = radius, degree = 2)
@@ -193,8 +217,12 @@ class BubbleMove:
 
     """Assemble boundary condition"""
     def assembleBC(self):
-        self.bcs = [DirichletBC(self.V, Constant((0.0,0.0)),  'near(x[1], 0.0) || near(x[1], 2.0)'),
-                    DirichletBC(self.V.sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
+        if(self.NS_sol_method == 'Standard'):
+            self.bcs = [DirichletBC(self.W.sub(0), Constant((0.0,0.0)),  'near(x[1], 0.0) || near(x[1], 2.0)'), \
+                        DirichletBC(self.W.sub(0).sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
+        elif(self.NS_sol_method == 'ICT'):
+            self.bcs = [DirichletBC(self.V, Constant((0.0,0.0)),  'near(x[1], 0.0) || near(x[1], 2.0)'), \
+                        DirichletBC(self.V.sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
 
 
     """Auxiliary function to compute density"""
@@ -268,13 +296,37 @@ class BubbleMove:
                        + self.eps_reinit*inner(grad(self.phi_intermediate), self.n)*inner(grad(self.l), self.n)*dx
 
 
+    """Weak formulation for Navier-Stokes"""
+    def NS_weak_form(self):
+        F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx \
+           + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
+           + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
+           - self.p*div(self.v)*dx \
+           + div(self.u)*self.q*dx \
+           + 1.0/self.At*inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
+
+        if(self.reinit_method == 'Non_Conservative'):
+            F2 += 1.0/(self.Bo*self.At)*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+        elif(self.reinit_method == 'Conservative'):
+            F2 += 1.0/(self.Bo*self.At)*CDelta_LS(self.phi_curr, self.eps_reinit)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+
+        #Save corresponding weak form and declare suitable matrix and vector
+        self.a2 = lhs(F2)
+        self.L2 = rhs(F2)
+
+        self.A2 = Matrix()
+        self.b2 = Vector()
+
+
     """Weak formulation for tentative velocity"""
     def ICT_weak_form_1(self):
         F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx  \
            + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
            + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p_old*div(self.v)*dx \
-           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
+           + 1.0/self.At*inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
 
         if(self.reinit_method == 'Non_Conservative'):
             F2 += 1.0/(self.Bo*self.At)*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
@@ -320,9 +372,12 @@ class BubbleMove:
         self.switcher_reinit_weak_form[self.reinit_method]()
 
         #Set variational problem for step 2 (Navier-Stokes)
-        self.ICT_weak_form_1()
-        self.ICT_weak_form_2()
-        self.ICT_weak_form_3()
+        if(self.NS_sol_method == 'Standard'):
+            self.NS_weak_form()
+        elif(self.NS_sol_method == 'ICT'):
+            self.ICT_weak_form_1()
+            self.ICT_weak_form_2()
+            self.ICT_weak_form_3()
 
 
     """Build the system for Level set simulation"""
@@ -397,6 +452,21 @@ class BubbleMove:
 
     """Build and solve the system for Navier-Stokes simulation"""
     def solve_Standard_NS_system(self):
+        # Assemble matrices and right-hand sides
+        assemble(self.a2, tensor = self.A2)
+        assemble(self.L2, tensor = self.b2)
+
+        # Apply boundary conditions
+        for bc in self.bcs:
+            bc.apply(self.A2)
+            bc.apply(self.b2)
+
+        #Solve the system
+        solve(self.A2, self.w_curr.vector(), self.b2)
+
+
+    """Build and solve the system for Navier-Stokes simulation"""
+    def solve_ICT_NS_systems(self):
         #Assemble matrices
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
@@ -462,9 +532,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim82/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim82/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim82/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim83/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim83/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim83/rho.pvd')
         self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
@@ -486,12 +556,18 @@ class BubbleMove:
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
-            self.solve_Standard_NS_system()
+            if(self.NS_sol_method == 'Standard'):
+                (self.u_old, self.p_old) = split(self.w_old)
+            self.switcher_NS[self.NS_sol_method]()
             end()
 
             #Prepare to next step assign previous-step solution
-            self.u_old.assign(self.u_curr)
-            self.p_old.assign(self.p_curr)
+            if(self.NS_sol_method == 'Standard'):
+                self.w_old.assign(self.w_curr)
+                (self.u_old, self.p_old) = self.w_old.split(True)
+            elif(self.NS_sol_method == 'ICT'):
+                self.u_old.assign(self.u_curr)
+                self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
 
             #Save and compute volume
