@@ -123,7 +123,8 @@ class BubbleMove:
             self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
                                                                     #and so a very small step is needed
         elif(self.reinit_method == 'Conservative'):
-            self.dt_reinit = Constant(0.5*hmin**(1.1))
+            self.dtau = 0.5*hmin**(1.1)
+            self.dt_reinit = Constant(self.dtau)
             self.eps_reinit = Constant(0.5*hmin**(0.9))
 
         #Define FE spaces
@@ -209,7 +210,7 @@ class BubbleMove:
         if(self.reinit_method == 'Non_Conservative'):
             return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
         elif(self.reinit_method == 'Conservative'):
-            return self.phi_curr + self.mu1_mu2*(1.0 - self.phi_curr)
+            return x + self.mu1_mu2*(1.0 - x)
 
 
     """No stabilization"""
@@ -372,10 +373,11 @@ class BubbleMove:
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        for n in range(50):
+        tau = self.dtau
+        while tau <= 10.0:
             #Solve the system
             solve(self.F1_reinit == 0, self.phi_intermediate, \
-                  solver_parameters={"newton_solver": {'linear_solver': 'bicgstab', "preconditioner": "hypre_amg"}}, \
+                  solver_parameters={"newton_solver": {'linear_solver': 'gmres', "preconditioner": "hypre_amg"}}, \
                   form_compiler_parameters={"optimize": True})
 
             #Check if convergence has been reached
@@ -384,6 +386,7 @@ class BubbleMove:
 
             #Prepare for next iteration
             self.phi0.assign(self.phi_intermediate)
+            tau += self.dtau if tau + self.dtau <= 10.0 or abs(tau - 10.0) < DOLFIN_EPS else 10.0
 
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
@@ -459,9 +462,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim78/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim78/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim78/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim82/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim82/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim82/rho.pvd')
         self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
