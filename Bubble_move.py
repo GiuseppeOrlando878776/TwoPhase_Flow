@@ -167,7 +167,6 @@ class BubbleMove:
         self.p_old    = Function(self.P)
         if(self.NS_sol_method == 'Standard'):
             self.w_curr = Function(self.W)
-            self.w_old  = Function(self.W)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
 
@@ -203,8 +202,6 @@ class BubbleMove:
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
         self.p_old.assign(interpolate(Constant(0.0),self.P))
-        if(self.NS_sol_method == 'Standard'):
-            self.w_old.assign(interpolate(Constant((0.0,0.0,0.0)),self.W))
         if(self.reinit_method == 'Non_Conservative'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                             A = center[0], B = center[1], r = radius, degree = 2)
@@ -463,6 +460,7 @@ class BubbleMove:
 
         #Solve the system
         solve(self.A2, self.w_curr.vector(), self.b2)
+        (self.u_curr, self.p_curr) = self.w_curr.split(True)
 
 
     """Build and solve the system for Navier-Stokes simulation"""
@@ -532,9 +530,9 @@ class BubbleMove:
         #Time-stepping loop
         self.t = self.dt
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim83/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim83/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim83/rho.pvd')
+        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim84/phi_draw.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim84/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim84/rho.pvd')
         self.plot_and_volume()
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
@@ -556,18 +554,12 @@ class BubbleMove:
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
-            if(self.NS_sol_method == 'Standard'):
-                (self.u_old, self.p_old) = split(self.w_old)
             self.switcher_NS[self.NS_sol_method]()
             end()
 
             #Prepare to next step assign previous-step solution
-            if(self.NS_sol_method == 'Standard'):
-                self.w_old.assign(self.w_curr)
-                (self.u_old, self.p_old) = self.w_old.split(True)
-            elif(self.NS_sol_method == 'ICT'):
-                self.u_old.assign(self.u_curr)
-                self.p_old.assign(self.p_curr)
+            self.u_old.assign(self.u_curr)
+            self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
 
             #Save and compute volume
