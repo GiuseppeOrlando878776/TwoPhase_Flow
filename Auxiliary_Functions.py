@@ -20,7 +20,7 @@ def CHeaviside(psi, eps):
     return conditional(lt(abs(psi),eps), 0.5*(1.0 + psi/eps + 1/np.pi*sin(np.pi*psi/eps)), (ufl.sign(psi) + 1)/2.0)
 
 """'Continuous Dirac's delta approximation'"""
-def CDelta(psi, eps, method):
+def CDelta(psi, eps):
     return conditional(lt(abs(psi),eps), 1.0/(2.0*eps)*(1.0 + cos(np.pi*psi/eps)), 0.0)
 
 """'Continuous Dirac's delta approximation'"""

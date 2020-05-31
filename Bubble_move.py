@@ -109,6 +109,7 @@ class BubbleMove:
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
         self.e2 = Constant((0.0,1.0))
+        self.e1 = Constant((1.0,0.0))
 
         #Set parameter for standard output
         set_log_level(self.Param["Log_Level"])
@@ -181,6 +182,7 @@ class BubbleMove:
         #Define function and vector for plotting level-set and computing volume
         self.tmp = Function(self.Q)
         self.lev_set = np.empty_like(self.phi_old.vector().get_local())
+        self.timeseries_vec = np.empty(shape=(7,))
         self.rho_interp = Function(self.Q)
 
 
@@ -198,6 +200,9 @@ class BubbleMove:
         assert center[0] - radius > 0.0 and center[0] + radius < self.base and \
                center[1] - radius > 0.0 and center[1] + radius < self.height,\
                "Initial condition of interface goes outside the domain"
+
+        #Save perimeter for benchmark evaluation
+        self.Pa = 2.0*np.pi*radius
 
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
@@ -459,7 +464,7 @@ class BubbleMove:
             bc.apply(self.b2)
 
         #Solve the system
-        solve(self.A2, self.w_curr.vector(), self.b2)
+        solve(self.A2, self.w_curr.vector(), self.b2, "umfpack")
         (self.u_curr, self.p_curr) = self.w_curr.split(True)
 
 
@@ -500,18 +505,38 @@ class BubbleMove:
         #Assign vector to FE function
         self.tmp.vector().set_local(self.lev_set)
 
-        #Plot the function just computed
+        #Save the actual state for visualization
         if(self.n_iter % 50 == 0):
-            self.vtkfile_phi_draw << (self.tmp, self.t*self.t0)
             self.vtkfile_u << (self.u_old, self.t*self.t0)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
 
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
-        begin(int(LogLevel.INFO) + 1,"Volume = " + str(Vol))
-        end()
 
+        #Check circularity degree
+        if(self.reinit_method == 'Non_Conservative'):
+            Pb = assemble(CDelta(self.phi_old,self.eps)*dx)
+        elif(self.reinit_method == 'Conservative'):
+            Pb = assemble(CDelta_LS(self.phi_old,self.eps_reinit)*dx)
+        Chi = self.Pa/Pb
+
+        #Check centroid evolution
+        Xc = assemble(Expression("x[0]", degree=2)*self.tmp*dx)/Vol
+        Yc = assemble(Expression("x[1]", degree=2)*self.tmp*dx)/Vol
+
+        #Check rising bubble velocity
+        Uc = assemble(inner(self.u_old,self.e1)*self.tmp*dx)/Vol
+        Vc = assemble(inner(self.u_old,self.e2)*self.tmp*dx)/Vol
+
+        self.timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
+
+        #Check SDF(signed distance property) in case of standard Level-set method
+        if(self.reinit_method == 'Non_Conservative'):
+            L2_gradphi = assemble(sqrt(inner(grad(self.phi_old),grad(self.phi_old)))*dx)/(self.base*self.height)
+            self.timeseries_vec.append(L2_gradphi)
+
+        np.savetxt(self.timeseries,self.timeseries_vec)
 
     """Execute simulation"""
     def run(self):
@@ -528,12 +553,20 @@ class BubbleMove:
         self.set_weak_forms()
 
         #Time-stepping loop
-        self.t = self.dt
+        self.t = 0.0
         self.n_iter = 0
-        self.vtkfile_phi_draw = File('/u/archive/laureandi/orlando/Sim84/phi_draw.pvd')
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim84/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim84/rho.pvd')
+
+        #File for plotting
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim86/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim86/rho.pvd')
+
+        #File for benchamrk comparisons
+        self.timeseries = open('/u/archive/laureandi/orlando/Sim86/benchmark_series.dat','ab')
+
+        #Save initial state and start loop
         self.plot_and_volume()
+        self.timeseries.close()
+        self.t += self.dt
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
 
@@ -563,9 +596,11 @@ class BubbleMove:
             self.phi_old.assign(self.phi_curr)
 
             #Save and compute volume
-            begin(int(LogLevel.INFO) + 1,"Plotting and computing volume")
+            begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
+            self.timeseries = open('/u/archive/laureandi/orlando/Sim86/benchmark_series.dat','ab')
             self.n_iter += 1
             self.plot_and_volume()
+            self.timeseries.close()
             end()
 
             end()
