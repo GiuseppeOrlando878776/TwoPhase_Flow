@@ -45,7 +45,6 @@ class BubbleMove:
         self.reinit_method = self.Param["Reinit_Type"]
         self.stab_method   = self.Param["Stabilization_Type"]
         self.NS_sol_method = self.Param["NS_Procedure"]
-        self.eps = self.Param["Interface_Thickness"]
         self.alpha = self.Param["Stabilization_Parameter"]
 
         #Define an auxiliary dictionary to set proper solution procedure for Navier-Stokes
@@ -81,9 +80,6 @@ class BubbleMove:
         assert self.reinit_method in self.switcher_reinit_weak_form and self.switcher_reinit_solver, \
                "Reinitialization method not available"
 
-        #Compute the Atwood number according to the configuration file
-        self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
-
         #Compute density and viscosity ratio
         self.rho1_rho2 = self.rho1/self.rho2
         self.mu1_mu2 = self.mu1/self.mu2
@@ -94,16 +90,16 @@ class BubbleMove:
         try:
             self.Re = float(self.Param["Reynolds_number"])
             assert self.Re > 1.0, "Invalid Reynolds number specified"
-            self.L0 = (self.mu2*self.Re/(self.rho2*np.sqrt(self.At*0.98)))**(2/3)
+            self.L0 = (self.mu2*self.Re/(self.rho2*np.sqrt(0.98)))**(2/3)
         except RuntimeError as e:
             #In case Reynolds number is not present set the computational width of the box
             print("Setting reference length equal to the computational width of the box")
             self.L0 = self.base
-            self.Re = self.rho2*self.L0*np.sqrt(self.At*self.L0*0.98)/self.mu1
+            self.Re = self.rho2*self.L0*np.sqrt(self.L0*0.98)/self.mu1
 
         #Add reference time, velocity and pressure
-        self.t0 = np.sqrt(self.L0/(self.At*0.98))
-        self.U0 = np.sqrt(self.At*0.98*self.L0)
+        self.t0 = np.sqrt(self.L0/0.98)
+        self.U0 = np.sqrt(0.98*self.L0)
         self.p0 = self.mu2/self.t0
 
         #Convert useful constants to constant FENICS functions
@@ -130,14 +126,16 @@ class BubbleMove:
         #Parameters for reinitialization steps
         hmin = self.mesh.hmin()
         if(self.reinit_method == 'Non_Conservative'):
+            self.eps = self.Param["Interface_Thickness"]
             self.eps_reinit = Constant(hmin)
             self.alpha_reinit = Constant(0.0625*hmin)
             self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
                                                                     #and so a very small step is needed
         elif(self.reinit_method == 'Conservative'):
-            self.dtau = 0.5*hmin**(1.1)
-            self.dt_reinit = Constant(self.dtau)
+            self.dt_reinit = Constant(0.5*hmin**(1.1))
             self.eps_reinit = Constant(0.5*hmin**(0.9))
+            self.eps = self.eps_reinit
+
 
         #Define FE spaces
         self.V  = VectorFunctionSpace(self.mesh, "CG", self.deg + 1)
@@ -201,9 +199,6 @@ class BubbleMove:
                center[1] - radius > 0.0 and center[1] + radius < self.height,\
                "Initial condition of interface goes outside the domain"
 
-        #Save perimeter for benchmark evaluation
-        self.Pa = 2.0*np.pi*radius
-
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
         self.p_old.assign(interpolate(Constant(0.0),self.P))
@@ -213,7 +208,7 @@ class BubbleMove:
             self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
             f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
-                            A = center[0], B = center[1], r = radius, eps = self.eps_reinit, degree = 2)
+                            A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
             self.phi_old.assign(interpolate(f, self.Q))
 
 
@@ -258,8 +253,8 @@ class BubbleMove:
     """SUPG method"""
     def SUPG(self, phi, l):
         r = ((phi - self.phi_old)/self.DT + inner(self.u_old, grad(phi)))* \
-            self.alpha*self.h/ufl.Max(2.0*sqrt(inner(self.u_old,self.u_old)), 4.0/(self.Re*self.h))*\
-            inner(self.u_old,self.u_old)*inner(self.u_old, grad(l))*dx
+            self.h/ufl.Max(2.0*sqrt(inner(self.u_old,self.u_old)), 4.0/(self.Re*self.h))*\
+            inner(self.u_old, grad(l))*dx
         return r
 
 
@@ -305,13 +300,13 @@ class BubbleMove:
            + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p*div(self.v)*dx \
            + div(self.u)*self.q*dx \
-           + 1.0/self.At*inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
+           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
 
         if(self.reinit_method == 'Non_Conservative'):
-            F2 += 1.0/(self.Bo*self.At)*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+            F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
         elif(self.reinit_method == 'Conservative'):
-            F2 += 1.0/(self.Bo*self.At)*CDelta_LS(self.phi_curr, self.eps_reinit)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+            F2 += 1.0/self.Bo*CDelta_LS(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -328,13 +323,13 @@ class BubbleMove:
            + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
            + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p_old*div(self.v)*dx \
-           + 1.0/self.At*inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
+           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
 
         if(self.reinit_method == 'Non_Conservative'):
-            F2 += 1.0/(self.Bo*self.At)*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+            F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
         elif(self.reinit_method == 'Conservative'):
-            F2 += 1.0/(self.Bo*self.At)*CDelta_LS(self.phi_curr, self.eps_reinit)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+            F2 += 1.0/self.Bo*CDelta_LS(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -402,14 +397,14 @@ class BubbleMove:
         self.phi0.assign(self.phi_curr)
 
         E_old = 1e10
-        for n in range(4):
+        for n in range(20):
             #Assemble and solve the system
             assemble(self.L1_reinit, tensor = self.b1_reinit)
             solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "icc")
 
             #Compute the error and check no divergence
             error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
-            E = sqrt(abs(assemble(error)))
+            E = sqrt(assemble(error))
 
             if(E_old < E):
                 raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
@@ -430,20 +425,18 @@ class BubbleMove:
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        tau = self.dtau
-        while tau <= 10.0:
+        for n in range(50):
             #Solve the system
             solve(self.F1_reinit == 0, self.phi_intermediate, \
                   solver_parameters={"newton_solver": {'linear_solver': 'gmres', "preconditioner": "hypre_amg"}}, \
                   form_compiler_parameters={"optimize": True})
 
             #Check if convergence has been reached
-            if(norm(assemble(self.F1_reinit), "L2") < 1e-6):
+            if(sqrt(assemble((((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx)) < 1e-4):
                 break
 
             #Prepare for next iteration
             self.phi0.assign(self.phi_intermediate)
-            tau += self.dtau if tau + self.dtau <= 10.0 or abs(tau - 10.0) < DOLFIN_EPS else 10.0
 
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
@@ -479,20 +472,26 @@ class BubbleMove:
         [bc.apply(self.b2) for bc in self.bcs]
 
         #Solve the first system
-        solve(self.A2, self.u_curr.vector(), self.b2, "bicgstab", "default")
+        solve(self.A2, self.u_curr.vector(), self.b2, "gmres", "default")
 
         #Assemble and solve the second system
         assemble(self.a2_bis, tensor = self.A2_bis)
         assemble(self.L2_bis, tensor = self.b2_bis)
-        solve(self.A2_bis, self.p_curr.vector(), self.b2_bis, "bicgstab", "default")
+        solve(self.A2_bis, self.p_curr.vector(), self.b2_bis, "gmres", "default")
 
         #Assemble and solve the third system
         assemble(self.L2_tris, tensor = self.b2_tris)
-        solve(self.A2_tris, self.u_curr.vector(), self.b2_tris, "cg", "icc")
+        solve(self.A2_tris, self.u_curr.vector(), self.b2_tris, "cg", "default")
 
 
     """Plot the level-set function and compute the volume"""
     def plot_and_volume(self):
+        #Save the actual state for visualization
+        if(self.n_iter % 50 == 0):
+            self.vtkfile_u << (self.u_old, self.t*self.t0)
+            self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
+            self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
+
         #Extract vector for FE function
         phi_old_vec = self.phi_old.vector().get_local()
 
@@ -505,21 +504,16 @@ class BubbleMove:
         #Assign vector to FE function
         self.tmp.vector().set_local(self.lev_set)
 
-        #Save the actual state for visualization
-        if(self.n_iter % 50 == 0):
-            self.vtkfile_u << (self.u_old, self.t*self.t0)
-            self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
-            self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
-
         #Check volume consistency
         Vol = assemble(self.tmp*dx)
 
         #Check circularity degree
+        Pa = 2.0*sqrt(np.pi*Vol)
         if(self.reinit_method == 'Non_Conservative'):
             Pb = assemble(CDelta(self.phi_old,self.eps)*dx)
         elif(self.reinit_method == 'Conservative'):
-            Pb = assemble(CDelta_LS(self.phi_old,self.eps_reinit)*dx)
-        Chi = self.Pa/Pb
+            Pb = assemble(CDelta_LS(self.phi_old,self.eps)*dx)
+        Chi = Pa/Pb
 
         #Check centroid evolution
         Xc = assemble(Expression("x[0]", degree=2)*self.tmp*dx)/Vol
@@ -533,7 +527,7 @@ class BubbleMove:
 
         #Check SDF(signed distance property) in case of standard Level-set method
         if(self.reinit_method == 'Non_Conservative'):
-            L2_gradphi = assemble(sqrt(inner(grad(self.phi_old),grad(self.phi_old)))*dx)/(self.base*self.height)
+            L2_gradphi = sqrt(assemble(inner(grad(self.phi_old),grad(self.phi_old))*dx))/(self.base*self.height)
             self.timeseries_vec.append(L2_gradphi)
 
         np.savetxt(self.timeseries,self.timeseries_vec)
@@ -557,11 +551,11 @@ class BubbleMove:
         self.n_iter = 0
 
         #File for plotting
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim86/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim86/rho.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim94/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim94/rho.pvd')
 
         #File for benchamrk comparisons
-        self.timeseries = open('/u/archive/laureandi/orlando/Sim86/benchmark_series.dat','ab')
+        self.timeseries = open('/u/archive/laureandi/orlando/Sim94/benchmark_series.dat','ab')
 
         #Save initial state and start loop
         self.plot_and_volume()
@@ -576,14 +570,16 @@ class BubbleMove:
             end()
 
             #Solve Level-set reinit
-            try:
-                begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                self.switcher_reinit_solver[self.reinit_method]()
-                end()
-            except RuntimeError as e:
-                print(e)
-                print("Aborting simulation...")
-                exit(1)
+            self.n_iter += 1
+            if(self.n_iter % 10 == 0):
+                try:
+                    begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
+                    self.switcher_reinit_solver[self.reinit_method]()
+                    end()
+                except RuntimeError as e:
+                    print(e)
+                    print("Aborting simulation...")
+                    exit(1)
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
@@ -595,10 +591,9 @@ class BubbleMove:
             self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
 
-            #Save and compute volume
+            #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
-            self.timeseries = open('/u/archive/laureandi/orlando/Sim86/benchmark_series.dat','ab')
-            self.n_iter += 1
+            self.timeseries = open('/u/archive/laureandi/orlando/Sim94/benchmark_series.dat','ab')
             self.plot_and_volume()
             self.timeseries.close()
             end()
