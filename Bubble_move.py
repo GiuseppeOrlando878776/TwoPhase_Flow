@@ -45,7 +45,6 @@ class BubbleMove:
         self.reinit_method = self.Param["Reinit_Type"]
         self.stab_method   = self.Param["Stabilization_Type"]
         self.NS_sol_method = self.Param["NS_Procedure"]
-        self.alpha = self.Param["Stabilization_Parameter"]
 
         #Define an auxiliary dictionary to set proper solution procedure for Navier-Stokes
         try:
@@ -120,6 +119,7 @@ class BubbleMove:
         #Prepare useful variables for stabilization
         self.h = CellDiameter(self.mesh)
         if(self.stab_method == 'IP'):
+            self.alpha = self.Param["Stabilization_Parameter"]
             self.n_mesh = FacetNormal(self.mesh)
             self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
@@ -127,8 +127,8 @@ class BubbleMove:
         hmin = self.mesh.hmin()
         if(self.reinit_method == 'Non_Conservative'):
             self.eps = self.Param["Interface_Thickness"]
-            self.eps_reinit = Constant(hmin)
-            self.alpha_reinit = Constant(0.0625*hmin)
+            self.gamma_reinit = Constant(hmin)
+            self.beta_reinit = Constant(0.0625*hmin)
             self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
                                                                     #and so a very small step is needed
         elif(self.reinit_method == 'Conservative'):
@@ -178,9 +178,6 @@ class BubbleMove:
                                                  #reinitialization and it is also useful for clearness
 
         #Define function and vector for plotting level-set and computing volume
-        self.tmp = Function(self.Q)
-        self.lev_set = np.empty_like(self.phi_old.vector().get_local())
-        self.timeseries_vec = np.empty(shape=(7,))
         self.rho_interp = Function(self.Q)
 
 
@@ -277,8 +274,8 @@ class BubbleMove:
     def NCLSM_weak_form(self):
         self.a1_reinit = self.phi/self.dt_reinit*self.l*dx
         self.L1_reinit = self.phi0/self.dt_reinit*self.l*dx + \
-                         signp(self.phi_curr, self.eps_reinit)*(1.0 - mgrad(self.phi0))*self.l*dx -\
-                         self.alpha_reinit*inner(grad(self.phi0), grad(self.l))*dx
+                         signp(self.phi_curr, self.gamma_reinit)*(1.0 - mgrad(self.phi0))*self.l*dx -\
+                         self.beta_reinit*inner(grad(self.phi0), grad(self.l))*dx
 
         #Save the matrix that will not change and declare vector
         self.A1_reinit = assemble(self.a1_reinit)
@@ -306,7 +303,7 @@ class BubbleMove:
             F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
         elif(self.reinit_method == 'Conservative'):
-            F2 += 1.0/self.Bo*CDelta_LS(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+            F2 += 1.0/self.Bo*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -329,7 +326,7 @@ class BubbleMove:
             F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
         elif(self.reinit_method == 'Conservative'):
-            F2 += 1.0/self.Bo*CDelta_LS(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+            F2 += 1.0/self.Bo*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
                   inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
@@ -397,7 +394,7 @@ class BubbleMove:
         self.phi0.assign(self.phi_curr)
 
         E_old = 1e10
-        for n in range(20):
+        for n in range(100):
             #Assemble and solve the system
             assemble(self.L1_reinit, tensor = self.b1_reinit)
             solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "icc")
@@ -408,7 +405,7 @@ class BubbleMove:
 
             if(E_old < E):
                 raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
-            elif(E < 1e-3):
+            elif(E < 1e-4):
                 break
 
             #Set previous step solution
@@ -425,7 +422,7 @@ class BubbleMove:
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        for n in range(50):
+        for n in range(100):
             #Solve the system
             solve(self.F1_reinit == 0, self.phi_intermediate, \
                   solver_parameters={"newton_solver": {'linear_solver': 'gmres', "preconditioner": "hypre_amg"}}, \
@@ -468,8 +465,9 @@ class BubbleMove:
         assemble(self.L2, tensor = self.b2)
 
         #Apply boundary conditions
-        [bc.apply(self.A2) for bc in self.bcs]
-        [bc.apply(self.b2) for bc in self.bcs]
+        for bc in self.bcs:
+            bc.apply(self.A2)
+            bc.apply(self.b2)
 
         #Solve the first system
         solve(self.A2, self.u_curr.vector(), self.b2, "gmres", "default")
@@ -492,45 +490,30 @@ class BubbleMove:
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
 
-        #Extract vector for FE function
-        phi_old_vec = self.phi_old.vector().get_local()
-
-        #Construct vector of ones inside the bubble
+        #Compute benchamrk quantities
         if(self.reinit_method == 'Non_Conservative'):
-            self.lev_set = 1.0*(phi_old_vec < 0.0)
-        elif(self.reinit_method == 'Conservative'):
-            self.lev_set = 1.0*(phi_old_vec < 0.5)
-
-        #Assign vector to FE function
-        self.tmp.vector().set_local(self.lev_set)
-
-        #Check volume consistency
-        Vol = assemble(self.tmp*dx)
-
-        #Check circularity degree
-        Pa = 2.0*sqrt(np.pi*Vol)
-        if(self.reinit_method == 'Non_Conservative'):
+            Vol = assemble((1.0 - CHeaviside(self.phi_old,self.eps))*dx)
+            Pa = 2.0*sqrt(np.pi*Vol)
             Pb = assemble(CDelta(self.phi_old,self.eps)*dx)
-        elif(self.reinit_method == 'Conservative'):
-            Pb = assemble(CDelta_LS(self.phi_old,self.eps)*dx)
-        Chi = Pa/Pb
-
-        #Check centroid evolution
-        Xc = assemble(Expression("x[0]", degree=2)*self.tmp*dx)/Vol
-        Yc = assemble(Expression("x[1]", degree=2)*self.tmp*dx)/Vol
-
-        #Check rising bubble velocity
-        Uc = assemble(inner(self.u_old,self.e1)*self.tmp*dx)/Vol
-        Vc = assemble(inner(self.u_old,self.e2)*self.tmp*dx)/Vol
-
-        self.timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
-
-        #Check SDF(signed distance property) in case of standard Level-set method
-        if(self.reinit_method == 'Non_Conservative'):
+            Chi = Pa/Pb
+            Xc = assemble(Expression("x[0]", degree=1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
+            Yc = assemble(Expression("x[1]", degree=1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
+            Uc = assemble(inner(self.u_old,self.e1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
+            Vc = assemble(inner(self.u_old,self.e2)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
             L2_gradphi = sqrt(assemble(inner(grad(self.phi_old),grad(self.phi_old))*dx))/(self.base*self.height)
-            self.timeseries_vec.append(L2_gradphi)
+            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc,L2_gradphi]
+        elif(self.reinit_method == 'Conservative'):
+            Vol = assemble((1.0 - self.phi_old)*dx)
+            Pa = 2.0*sqrt(np.pi*Vol)
+            Pb = assemble(sqrt(inner(grad(self.phi_old),grad(self.phi_old)))*dx)
+            Chi = Pa/Pb
+            Xc = assemble(Expression("x[0]", degree=1)*(1.0 - self.phi_old)*dx)/Vol
+            Yc = assemble(Expression("x[1]", degree=1)*(1.0 - self.phi_old)*dx)/Vol
+            Uc = assemble(inner(self.u_old,self.e1)*(1.0 - self.phi_old)*dx)/Vol
+            Vc = assemble(inner(self.u_old,self.e2)*(1.0 - self.phi_old)*dx)/Vol
+            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
 
-        np.savetxt(self.timeseries,self.timeseries_vec)
+        np.savetxt(self.timeseries, timeseries_vec)
 
     """Execute simulation"""
     def run(self):
@@ -551,11 +534,11 @@ class BubbleMove:
         self.n_iter = 0
 
         #File for plotting
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim94/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim94/rho.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim98/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim98/rho.pvd')
 
         #File for benchamrk comparisons
-        self.timeseries = open('/u/archive/laureandi/orlando/Sim94/benchmark_series.dat','ab')
+        self.timeseries = open('/u/archive/laureandi/orlando/Sim98/benchmark_series.dat','ab')
 
         #Save initial state and start loop
         self.plot_and_volume()
@@ -563,6 +546,7 @@ class BubbleMove:
         self.t += self.dt
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
+            self.n_iter += 1
 
             #Solve level-set
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
@@ -570,7 +554,6 @@ class BubbleMove:
             end()
 
             #Solve Level-set reinit
-            self.n_iter += 1
             if(self.n_iter % 10 == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
@@ -593,7 +576,7 @@ class BubbleMove:
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
-            self.timeseries = open('/u/archive/laureandi/orlando/Sim94/benchmark_series.dat','ab')
+            self.timeseries = open('/u/archive/laureandi/orlando/Sim98/benchmark_series.dat','ab')
             self.plot_and_volume()
             self.timeseries.close()
             end()
