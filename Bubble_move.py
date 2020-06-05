@@ -127,10 +127,7 @@ class BubbleMove:
         hmin = self.mesh.hmin()
         if(self.reinit_method == 'Non_Conservative'):
             self.eps = self.Param["Interface_Thickness"]
-            self.gamma_reinit = Constant(hmin)
-            self.beta_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
-                                                                    #and so a very small step is needed
+            self.beta_reinit = Constant(1.0e3)
         elif(self.reinit_method == 'Conservative'):
             self.dt_reinit = Constant(0.5*hmin**(1.1))
             self.eps_reinit = Constant(0.5*hmin**(0.9))
@@ -272,13 +269,12 @@ class BubbleMove:
 
     """Weak form non-conservative reinitialization"""
     def NCLSM_weak_form(self):
-        self.a1_reinit = self.phi/self.dt_reinit*self.l*dx
-        self.L1_reinit = self.phi0/self.dt_reinit*self.l*dx + \
-                         signp(self.phi_curr, self.gamma_reinit)*(1.0 - mgrad(self.phi0))*self.l*dx -\
-                         self.beta_reinit*inner(grad(self.phi0), grad(self.l))*dx
+        self.a1_reinit = inner(grad(self.phi),grad(self.l))*dx + \
+                         self.beta_reinit*self.phi*self.l*CDelta(self.phi_curr,self.eps)*dx
+        self.L1_reinit = inner(grad(self.phi0)/sqrt(inner(grad(self.phi0),grad(self.phi0))),grad(self.l))*dx
 
-        #Save the matrix that will not change and declare vector
-        self.A1_reinit = assemble(self.a1_reinit)
+        #Declare matrix and vector
+        self.A1_reinit = Matrix()
         self.b1_reinit = Vector()
 
 
@@ -381,7 +377,7 @@ class BubbleMove:
         assemble(self.L1, tensor = self.b1)
 
         #Solve the level-set system
-        solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "hypre_amg")
+        solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "default")
 
         #Compute normal vector (in case we avoid reconstrution)
         grad_phi = grad(self.phi_curr)
@@ -390,8 +386,9 @@ class BubbleMove:
 
     """Build and solve the system for Level set reinitialization (non-conservative)"""
     def NC_Levelset_reinit(self):
-        #Assign current solution
+        #Assign current solution and buil the matrix
         self.phi0.assign(self.phi_curr)
+        assemble(self.a1_reinit, tensor = self.A1_reinit)
 
         E_old = 1e10
         for n in range(100):
@@ -400,7 +397,7 @@ class BubbleMove:
             solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "icc")
 
             #Compute the error and check no divergence
-            error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
+            error = ((self.phi_intermediate - self.phi0)**2)*dx
             E = sqrt(assemble(error))
 
             if(E_old < E):
@@ -425,7 +422,7 @@ class BubbleMove:
         for n in range(100):
             #Solve the system
             solve(self.F1_reinit == 0, self.phi_intermediate, \
-                  solver_parameters={"newton_solver": {'linear_solver': 'gmres', "preconditioner": "hypre_amg"}}, \
+                  solver_parameters={"newton_solver": {'linear_solver': 'gmres', "preconditioner": "default"}}, \
                   form_compiler_parameters={"optimize": True})
 
             #Check if convergence has been reached

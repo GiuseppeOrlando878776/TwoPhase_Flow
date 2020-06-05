@@ -8,7 +8,7 @@ def main():
         param_test = My_Parameters("test.cfg")
     param_handler = param_test.get_param()
     try:
-        print(str(param_handler["Reynolds_number"]))
+        print(str(param_handler["Reinit_Type"]))
         print(param_handler["Stabilization_Type"])
         print(param_handler["NS_Procedure"])
     except RuntimeError as e:
