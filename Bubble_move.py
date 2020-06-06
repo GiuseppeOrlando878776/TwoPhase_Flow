@@ -127,7 +127,10 @@ class BubbleMove:
         hmin = self.mesh.hmin()
         if(self.reinit_method == 'Non_Conservative'):
             self.eps = self.Param["Interface_Thickness"]
-            self.beta_reinit = Constant(1.0e3)
+            self.gamma_reinit = Constant(hmin)
+            self.beta_reinit = Constant(0.0625*hmin)
+            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                    #and so a very small step is needed
         elif(self.reinit_method == 'Conservative'):
             self.dt_reinit = Constant(0.5*hmin**(1.1))
             self.eps_reinit = Constant(0.5*hmin**(0.9))
@@ -141,8 +144,8 @@ class BubbleMove:
             Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
             Pelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
-        self.Q  = FunctionSpace(self.mesh, "CG", 2)
-        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+        self.Q  = FunctionSpace(self.mesh, "CG", 1)
+        #self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         if(self.NS_sol_method == 'Standard'):
@@ -167,7 +170,7 @@ class BubbleMove:
         self.phi_old  = Function(self.Q)
 
         #Define function to store the normal
-        self.n = Function(self.Q2)
+        #self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
@@ -198,7 +201,7 @@ class BubbleMove:
         self.p_old.assign(interpolate(Constant(0.0),self.P))
         if(self.reinit_method == 'Non_Conservative'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
-                            A = center[0], B = center[1], r = radius, degree = 2)
+                            A = center[0], B = center[1], r = radius, degree = 8)
             self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
             f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
@@ -219,7 +222,7 @@ class BubbleMove:
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
         if(self.reinit_method == 'Non_Conservative'):
-            return CHeaviside(x,eps) + self.rho1_rho2*(1.0 - CHeaviside(x,eps))
+            return self.rho2*CHeaviside(x,eps) + self.rho1*(1.0 - CHeaviside(x,eps))
         elif(self.reinit_method == 'Conservative'):
             return x + self.rho1_rho2*(1.0 - x)
 
@@ -227,7 +230,7 @@ class BubbleMove:
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
         if(self.reinit_method == 'Non_Conservative'):
-            return CHeaviside(x,eps) + self.mu1_mu2*(1.0 - CHeaviside(x,eps))
+            return self.mu2*CHeaviside(x,eps) + self.mu1*(1.0 - CHeaviside(x,eps))
         elif(self.reinit_method == 'Conservative'):
             return x + self.mu1_mu2*(1.0 - x)
 
@@ -269,14 +272,14 @@ class BubbleMove:
 
     """Weak form non-conservative reinitialization"""
     def NCLSM_weak_form(self):
-        self.a1_reinit = inner(grad(self.phi),grad(self.l))*dx + \
-                         self.beta_reinit*self.phi*self.l*CDelta(self.phi_curr,self.eps)*dx
-        self.L1_reinit = inner(grad(self.phi0)/sqrt(inner(grad(self.phi0),grad(self.phi0))),grad(self.l))*dx
+        self.a1_reinit = self.phi/self.dt_reinit*self.l*dx
+        self.L1_reinit = self.phi0/self.dt_reinit*self.l*dx + \
+                         signp(self.phi_curr, self.gamma_reinit)*(1.0 - mgrad(self.phi0))*self.l*dx -\
+                         self.beta_reinit*inner(grad(self.phi0), grad(self.l))*dx
 
-        #Declare matrix and vector
-        self.A1_reinit = Matrix()
+        #Save the matrix that will not change and declare vector
+        self.A1_reinit = assemble(self.a1_reinit)
         self.b1_reinit = Vector()
-
 
     """Weak form conservative reinitialization"""
     def CLSM_weak_form(self):
@@ -290,17 +293,17 @@ class BubbleMove:
     def NS_weak_form(self):
         F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx \
            + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
-           + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
+           + 2.0*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
            - self.p*div(self.v)*dx \
            + div(self.u)*self.q*dx \
-           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
+           + 0.98*inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
 
-        if(self.reinit_method == 'Non_Conservative'):
-            F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
-        elif(self.reinit_method == 'Conservative'):
-            F2 += 1.0/self.Bo*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+        #if(self.reinit_method == 'Non_Conservative'):
+        #    F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+        #          inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+        #elif(self.reinit_method == 'Conservative'):
+        #    F2 += 1.0/self.Bo*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+        #          inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -380,15 +383,14 @@ class BubbleMove:
         solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "default")
 
         #Compute normal vector (in case we avoid reconstrution)
-        grad_phi = grad(self.phi_curr)
-        self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
+        #grad_phi = grad(self.phi_curr)
+        #self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
 
 
     """Build and solve the system for Level set reinitialization (non-conservative)"""
     def NC_Levelset_reinit(self):
         #Assign current solution and buil the matrix
         self.phi0.assign(self.phi_curr)
-        assemble(self.a1_reinit, tensor = self.A1_reinit)
 
         E_old = 1e10
         for n in range(100):
@@ -397,7 +399,7 @@ class BubbleMove:
             solve(self.A1_reinit, self.phi_intermediate.vector(), self.b1_reinit, "cg" , "icc")
 
             #Compute the error and check no divergence
-            error = ((self.phi_intermediate - self.phi0)**2)*dx
+            error = (((self.phi_intermediate - self.phi0)/self.dt_reinit)**2)*dx
             E = sqrt(assemble(error))
 
             if(E_old < E):
@@ -411,8 +413,8 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        grad_phi = grad(self.phi_curr)
-        self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
+        #grad_phi = grad(self.phi_curr)
+        #self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
@@ -497,7 +499,7 @@ class BubbleMove:
             Yc = assemble(Expression("x[1]", degree=1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
             Uc = assemble(inner(self.u_old,self.e1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
             Vc = assemble(inner(self.u_old,self.e2)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
-            L2_gradphi = sqrt(assemble(inner(grad(self.phi_old),grad(self.phi_old))*dx))/(self.base*self.height)
+            L2_gradphi = sqrt(assemble(inner(grad(self.phi_old),grad(self.phi_old))*dx)/(self.base*self.height))
             timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc,L2_gradphi]
         elif(self.reinit_method == 'Conservative'):
             Vol = assemble((1.0 - self.phi_old)*dx)
@@ -531,11 +533,11 @@ class BubbleMove:
         self.n_iter = 0
 
         #File for plotting
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim98/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim98/rho.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim104/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim104/rho.pvd')
 
         #File for benchamrk comparisons
-        self.timeseries = open('/u/archive/laureandi/orlando/Sim98/benchmark_series.dat','ab')
+        self.timeseries = open('/u/archive/laureandi/orlando/Sim104/benchmark_series.dat','ab')
 
         #Save initial state and start loop
         self.plot_and_volume()
@@ -573,7 +575,7 @@ class BubbleMove:
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
-            self.timeseries = open('/u/archive/laureandi/orlando/Sim98/benchmark_series.dat','ab')
+            self.timeseries = open('/u/archive/laureandi/orlando/Sim104/benchmark_series.dat','ab')
             self.plot_and_volume()
             self.timeseries.close()
             end()
