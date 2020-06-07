@@ -1,9 +1,9 @@
+from TwoPhaseFlows import *
 from My_Parameters import My_Parameters
-from Auxiliary_Functions import *
 
 from sys import exit
 
-class BubbleMove:
+class BubbleMove(TwoPhaseFlows):
     """Class constructor"""
     def __init__(self, param_name):
         """
@@ -20,6 +20,10 @@ class BubbleMove:
         deg   --- Polynomial degree
         """
 
+        #Call the base class constructor
+        super(BubbleMove, self).__init__()
+
+        #Start with the specific problem settings
         self.Param = My_Parameters(param_name).get_param()
 
         try:
@@ -57,31 +61,23 @@ class BubbleMove:
         assert self.NS_sol_method in self.switcher_NS, \
                "Solution method for Navier-Stokes not available"
 
-        #Define an auxiliary dictionary to set proper stabilization
-        try:
-            self.switcher_stab = {'IP':self.IP, 'SUPG':self.SUPG, 'None':self.no_stab}
-        except NameError as e:
-            print("Stabilization method " + str(e).split("'")[1] + " declared but not implemented")
-            exit(1)
-        assert self.stab_method in self.switcher_stab, \
-               "Stabilization method not available"
-
         #Check correctness of reinitialization method (in order to avoid typos in particular
         #since, contrarly to stabilization, it is more difficult to think to other choises)
         #through auxiliary functions which can be eaily updated in future if needed
         try:
-            self.switcher_reinit_weak_form = {'Non_Conservative':self.NCLSM_weak_form, 'Conservative':self.CLSM_weak_form}
-            self.switcher_reinit_solver    = {'Non_Conservative':self.NC_Levelset_reinit, \
-                                              'Conservative':self.C_Levelset_reinit}
+            self.switcher_reinit_solver = {'Non_Conservative':self.NC_Levelset_reinit, \
+                                           'Conservative':self.C_Levelset_reinit}
         except NameError as e:
             print("Reinitialization method " + str(e).split("'")[1] + " declared but not implemented")
             exit(1)
-        assert self.reinit_method in self.switcher_reinit_weak_form and self.switcher_reinit_solver, \
+        assert self.reinit_method in self.switcher_reinit_solver, \
                "Reinitialization method not available"
 
         #Compute density and viscosity ratio
         self.rho1_rho2 = self.rho1/self.rho2
         self.mu1_mu2 = self.mu1/self.mu2
+        self.g = 0.98
+        self.sigma = 1.96
 
         #Compute the reference length (we need it in order to adimensionalize the level-set):
         #since density and viscosity are physical properties it is reasonable to compute it from the
@@ -89,7 +85,7 @@ class BubbleMove:
         try:
             self.Re = float(self.Param["Reynolds_number"])
             assert self.Re > 1.0, "Invalid Reynolds number specified"
-            self.L0 = (self.mu2*self.Re/(self.rho2*np.sqrt(0.98)))**(2/3)
+            self.L0 = (self.mu2*self.Re/(self.rho2*np.sqrt(self.g)))**(2/3)
         except RuntimeError as e:
             #In case Reynolds number is not present set the computational width of the box
             print("Setting reference length equal to the computational width of the box")
@@ -97,14 +93,12 @@ class BubbleMove:
             self.Re = self.rho2*self.L0*np.sqrt(self.L0*0.98)/self.mu1
 
         #Add reference time, velocity and pressure
-        self.t0 = np.sqrt(self.L0/0.98)
-        self.U0 = np.sqrt(0.98*self.L0)
+        self.t0 = np.sqrt(self.L0/self.g)
+        self.U0 = np.sqrt(self.g*self.L0)
         self.p0 = self.mu2/self.t0
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
-        self.e2 = Constant((0.0,1.0))
-        self.e1 = Constant((1.0,0.0))
 
         #Set parameter for standard output
         set_log_level(self.Param["Log_Level"])
@@ -117,11 +111,8 @@ class BubbleMove:
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
 
         #Prepare useful variables for stabilization
-        self.h = CellDiameter(self.mesh)
         if(self.stab_method == 'IP'):
             self.alpha = self.Param["Stabilization_Parameter"]
-            self.n_mesh = FacetNormal(self.mesh)
-            self.h_avg  = (self.h('+') + self.h('-'))/2.0
 
         #Parameters for reinitialization steps
         hmin = self.mesh.hmin()
@@ -135,7 +126,6 @@ class BubbleMove:
             self.dt_reinit = Constant(0.5*hmin**(1.1))
             self.eps_reinit = Constant(0.5*hmin**(0.9))
             self.eps = self.eps_reinit
-
 
         #Define FE spaces
         self.V  = VectorFunctionSpace(self.mesh, "CG", self.deg + 1)
@@ -197,8 +187,8 @@ class BubbleMove:
                "Initial condition of interface goes outside the domain"
 
         #Assign initial condition
-        self.u_old.assign(interpolate(Constant((0.0,0.0)),self.V))
-        self.p_old.assign(interpolate(Constant(0.0),self.P))
+        self.u_old.assign(interpolate(Constant((0.0,0.0)), self.V))
+        self.p_old.assign(interpolate(Constant(0.0), self.P))
         if(self.reinit_method == 'Non_Conservative'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                             A = center[0], B = center[1], r = radius, degree = 2)
@@ -235,142 +225,39 @@ class BubbleMove:
             return self.mu2*x + self.mu1*(1.0 - x)
 
 
-    """No stabilization"""
-    def no_stab(self, phi, l):
-        return 0.0
-
-
-    """Interior penalty method"""
-    def IP(self, phi, l):
-        r = self.alpha*self.h_avg*self.h_avg* \
-            inner(jump(grad(phi),self.n_mesh), jump(grad(l),self.n_mesh))*dS
-        return r
-
-
-    """SUPG method"""
-    def SUPG(self, phi, l):
-        r = ((phi - self.phi_old)/self.DT + inner(self.u_old, grad(phi)))* \
-            self.h/ufl.Max(2.0*sqrt(inner(self.u_old,self.u_old)), 4.0/(self.Re*self.h))*\
-            inner(self.u_old, grad(l))*dx
-        return r
-
-
-    """Level-set weak formulation"""
-    def LS_weak_form(self):
-        F1 = (self.phi - self.phi_old)/self.DT*self.l*dx \
-           + inner(self.u_old, grad(self.phi))*self.l*dx
-
-        F1 += self.switcher_stab[self.stab_method](self.phi, self.l)
-
-        #Save corresponding weak form and declare suitable matrix and vector
-        self.a1 = lhs(F1)
-        self.L1 = rhs(F1)
-
-        self.A1 = Matrix()
-        self.b1 = Vector()
-
-
-    """Weak form non-conservative reinitialization"""
-    def NCLSM_weak_form(self):
-        self.a1_reinit = self.phi/self.dt_reinit*self.l*dx
-        self.L1_reinit = self.phi0/self.dt_reinit*self.l*dx + \
-                         signp(self.phi_curr, self.gamma_reinit)*(1.0 - mgrad(self.phi0))*self.l*dx -\
-                         self.beta_reinit*inner(grad(self.phi0), grad(self.l))*dx
-
-        #Save the matrix that will not change and declare vector
-        self.A1_reinit = assemble(self.a1_reinit)
-        self.b1_reinit = Vector()
-
-    """Weak form conservative reinitialization"""
-    def CLSM_weak_form(self):
-        #Save variational formulation
-        self.F1_reinit = (self.phi_intermediate - self.phi0)/self.dt_reinit*self.l*dx \
-                       - self.phi_intermediate*(1.0 - self.phi_intermediate)*inner(grad(self.l), self.n)*dx \
-                       + self.eps_reinit*inner(grad(self.phi_intermediate), self.n)*inner(grad(self.l), self.n)*dx
-
-
-    """Weak formulation for Navier-Stokes"""
-    def NS_weak_form(self):
-        F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx \
-           + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
-           + 2.0*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
-           - self.p*div(self.v)*dx \
-           + div(self.u)*self.q*dx \
-           + 0.98*inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
-
-        if(self.reinit_method == 'Non_Conservative'):
-            F2 += 1.96*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
-        elif(self.reinit_method == 'Conservative'):
-            F2 += 1.96*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
-
-        #Save corresponding weak form and declare suitable matrix and vector
-        self.a2 = lhs(F2)
-        self.L2 = rhs(F2)
-
-        self.A2 = Matrix()
-        self.b2 = Vector()
-
-
-    """Weak formulation for tentative velocity"""
-    def ICT_weak_form_1(self):
-        F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr,self.eps)*self.u - self.rho(self.phi_old,self.eps)*self.u_old, self.v)*dx  \
-           + inner(self.rho(self.phi_curr,self.eps)*dot(self.u_old,nabla_grad(self.u)), self.v)*dx \
-           + 2.0/self.Re*inner(self.mu(self.phi_curr,self.eps)*D(self.u), D(self.v))*dx \
-           - self.p_old*div(self.v)*dx \
-           + inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
-
-        if(self.reinit_method == 'Non_Conservative'):
-            F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
-        elif(self.reinit_method == 'Conservative'):
-            F2 += 1.0/self.Bo*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
-
-        #Save corresponding weak form and declare suitable matrix and vector
-        self.a2 = lhs(F2)
-        self.L2 = rhs(F2)
-
-        self.A2 = Matrix()
-        self.b2 = Vector()
-
-    """Weak formulation for pressure correction"""
-    def ICT_weak_form_2(self):
-        #Define variational problem for step 2
-        self.a2_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p), grad(self.q))*dx
-        self.L2_bis = (1.0/self.rho(self.phi_curr,self.eps))*inner(grad(self.p_old), grad(self.q))*dx - \
-                      (1.0/self.DT)*div(self.u_curr)*self.q*dx
-
-        self.A2_bis = Matrix()
-        self.b2_bis = Vector()
-
-    """Weak formulation for velocity projection"""
-    def ICT_weak_form_3(self):
-        #Define variational problem for step 3
-        self.a2_tris = inner(self.u, self.v)*dx
-        self.L2_tris = inner(self.u_curr, self.v)*dx - \
-                       self.DT*inner(grad(self.p_curr - self.p_old), self.v)/self.rho(self.phi_curr,self.eps)*dx
-
-        self.A2_tris = assemble(self.a2_tris)
-        self.b2_tris = Vector()
-
-
     """Set weak formulations"""
     def set_weak_forms(self):
         #Set variational problem for step 1 (Level-set)
-        self.LS_weak_form()
+        if(self.stab_method == 'SUPG'):
+            self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, self.stab_method, self.Re)
+        elif(self.stab_method == 'IP'):
+            self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, self.stab_method, self.alpha)
+        elif(self.stab_method == 'None'):
+            self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, self.stab_method)
 
-        #Set variational problem for reinitialization after step 1
-        self.switcher_reinit_weak_form[self.reinit_method]()
+        #Set variational problem for reinitialization
+        if(self.reinit_method == 'Non_Conservative'):
+            self.NCLSM_hyperbolic_weak_form(self.phi, self.l, self.phi0, self.phi_curr, self.dt_reinit, self.gamma_reinit, self.beta_reinit)
+        elif(self.reinit_method == 'Conservative'):
+            self.CLSM_weak_form(self.phi_intermediate, self.l, self.phi0, self.n, self.dt_reinit, self.eps_reinit)
 
         #Set variational problem for step 2 (Navier-Stokes)
         if(self.NS_sol_method == 'Standard'):
-            self.NS_weak_form()
+            if(self.reinit_method == 'Non_Conservative'):
+                self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                                  self.phi_curr, self.phi_old, self.eps, self.g, self.sigma, self.n, CDelta)
+            elif(self.reinit_method == 'Conservative'):
+                self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                                  self.phi_curr, self.phi_old, self.eps, self.g, self.sigma, self.n)
         elif(self.NS_sol_method == 'ICT'):
-            self.ICT_weak_form_1()
-            self.ICT_weak_form_2()
-            self.ICT_weak_form_3()
+            if(self.stab_method == 'Non_Conservative'):
+                self.ICT_weak_form_1(self.u, self.v, self.u_old, self.DT, self.rho, self.mu, self.phi_curr, self.phi_old, \
+                                     self.eps, self.g, self.sigma, self.n, CDelta)
+            elif(self.stab_method == 'Conservative'):
+                self.ICT_weak_form_1(self.u, self.v, self.u_old, self.DT, self.rho, self.mu, self.phi_curr, self.phi_old, \
+                                     self.eps, self.g, self.sigma, self.n)
+            self.ICT_weak_form_2(self.p, self.q, self.DT, self.u_curr, self.rho, self.phi_curr, self.eps)
+            self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
 
 
     """Build the system for Level set simulation"""
@@ -533,11 +420,11 @@ class BubbleMove:
         self.n_iter = 0
 
         #File for plotting
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim109/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim109/rho.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim110/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim110/rho.pvd')
 
         #File for benchamrk comparisons
-        self.timeseries = open('/u/archive/laureandi/orlando/Sim109/benchmark_series.dat','ab')
+        self.timeseries = open('/u/archive/laureandi/orlando/Sim110/benchmark_series.dat','ab')
 
         #Save initial state and start loop
         self.plot_and_volume()
@@ -574,7 +461,7 @@ class BubbleMove:
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
-            self.timeseries = open('/u/archive/laureandi/orlando/Sim109/benchmark_series.dat','ab')
+            self.timeseries = open('/u/archive/laureandi/orlando/Sim110/benchmark_series.dat','ab')
             self.plot_and_volume()
             self.timeseries.close()
             end()
