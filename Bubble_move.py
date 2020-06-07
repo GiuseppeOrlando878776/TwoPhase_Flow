@@ -144,8 +144,8 @@ class BubbleMove:
             Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
             Pelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
-        self.Q  = FunctionSpace(self.mesh, "CG", 1)
-        #self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+        self.Q  = FunctionSpace(self.mesh, "CG", 2)
+        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         if(self.NS_sol_method == 'Standard'):
@@ -170,7 +170,7 @@ class BubbleMove:
         self.phi_old  = Function(self.Q)
 
         #Define function to store the normal
-        #self.n = Function(self.Q2)
+        self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
@@ -201,7 +201,7 @@ class BubbleMove:
         self.p_old.assign(interpolate(Constant(0.0),self.P))
         if(self.reinit_method == 'Non_Conservative'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
-                            A = center[0], B = center[1], r = radius, degree = 8)
+                            A = center[0], B = center[1], r = radius, degree = 2)
             self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
             f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
@@ -224,7 +224,7 @@ class BubbleMove:
         if(self.reinit_method == 'Non_Conservative'):
             return self.rho2*CHeaviside(x,eps) + self.rho1*(1.0 - CHeaviside(x,eps))
         elif(self.reinit_method == 'Conservative'):
-            return x + self.rho1_rho2*(1.0 - x)
+            return self.rho2*x + self.rho1*(1.0 - x)
 
 
     """Auxiliary function to compute viscosity"""
@@ -232,7 +232,7 @@ class BubbleMove:
         if(self.reinit_method == 'Non_Conservative'):
             return self.mu2*CHeaviside(x,eps) + self.mu1*(1.0 - CHeaviside(x,eps))
         elif(self.reinit_method == 'Conservative'):
-            return x + self.mu1_mu2*(1.0 - x)
+            return self.mu2*x + self.mu1*(1.0 - x)
 
 
     """No stabilization"""
@@ -298,12 +298,12 @@ class BubbleMove:
            + div(self.u)*self.q*dx \
            + 0.98*inner(self.rho(self.phi_curr,self.eps)*self.e2, self.v)*dx \
 
-        #if(self.reinit_method == 'Non_Conservative'):
-        #    F2 += 1.0/self.Bo*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-        #          inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
-        #elif(self.reinit_method == 'Conservative'):
-        #    F2 += 1.0/self.Bo*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
-        #          inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+        if(self.reinit_method == 'Non_Conservative'):
+            F2 += 1.96*CDelta(self.phi_curr, self.eps)*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
+        elif(self.reinit_method == 'Conservative'):
+            F2 += 1.96*sqrt(inner(grad(self.phi_curr), grad(self.phi_curr)))*\
+                  inner((Identity(2) - outer(self.n, self.n)), D(self.v))*dx
 
         #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
@@ -383,8 +383,8 @@ class BubbleMove:
         solve(self.A1, self.phi_curr.vector(), self.b1, "gmres", "default")
 
         #Compute normal vector (in case we avoid reconstrution)
-        #grad_phi = grad(self.phi_curr)
-        #self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
+        grad_phi = grad(self.phi_curr)
+        self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
 
 
     """Build and solve the system for Level set reinitialization (non-conservative)"""
@@ -413,15 +413,15 @@ class BubbleMove:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         self.phi_curr.assign(self.phi_intermediate)
-        #grad_phi = grad(self.phi_curr)
-        #self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
+        grad_phi = grad(self.phi_curr)
+        self.n.assign(project(grad_phi/sqrt(inner(grad_phi, grad_phi)), self.Q2))
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
     def C_Levelset_reinit(self):
         self.phi0.assign(self.phi_curr)
 
-        for n in range(100):
+        for n in range(10):
             #Solve the system
             solve(self.F1_reinit == 0, self.phi_intermediate, \
                   solver_parameters={"newton_solver": {'linear_solver': 'gmres', "preconditioner": "default"}}, \
@@ -485,9 +485,9 @@ class BubbleMove:
     def plot_and_volume(self):
         #Save the actual state for visualization
         if(self.n_iter % 50 == 0):
-            self.vtkfile_u << (self.u_old, self.t*self.t0)
+            self.vtkfile_u << (self.u_old, self.t)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
-            self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
+            self.vtkfile_rho << (self.rho_interp, self.t)
 
         #Compute benchamrk quantities
         if(self.reinit_method == 'Non_Conservative'):
@@ -533,18 +533,18 @@ class BubbleMove:
         self.n_iter = 0
 
         #File for plotting
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim104/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim104/rho.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim109/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim109/rho.pvd')
 
         #File for benchamrk comparisons
-        self.timeseries = open('/u/archive/laureandi/orlando/Sim104/benchmark_series.dat','ab')
+        self.timeseries = open('/u/archive/laureandi/orlando/Sim109/benchmark_series.dat','ab')
 
         #Save initial state and start loop
         self.plot_and_volume()
         self.timeseries.close()
         self.t += self.dt
         while self.t <= self.t_end:
-            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
+            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t) + " s")
             self.n_iter += 1
 
             #Solve level-set
@@ -553,15 +553,14 @@ class BubbleMove:
             end()
 
             #Solve Level-set reinit
-            if(self.n_iter % 10 == 0):
-                try:
-                    begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                    self.switcher_reinit_solver[self.reinit_method]()
-                    end()
-                except RuntimeError as e:
-                    print(e)
-                    print("Aborting simulation...")
-                    exit(1)
+            try:
+                begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
+                self.switcher_reinit_solver[self.reinit_method]()
+                end()
+            except RuntimeError as e:
+                print(e)
+                print("Aborting simulation...")
+                exit(1)
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
@@ -575,7 +574,7 @@ class BubbleMove:
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
-            self.timeseries = open('/u/archive/laureandi/orlando/Sim104/benchmark_series.dat','ab')
+            self.timeseries = open('/u/archive/laureandi/orlando/Sim109/benchmark_series.dat','ab')
             self.plot_and_volume()
             self.timeseries.close()
             end()
