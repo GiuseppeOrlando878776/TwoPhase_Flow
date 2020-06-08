@@ -259,28 +259,19 @@ class BubbleMove(TwoPhaseFlows):
             self.vtkfile_rho << (self.rho_interp, self.t)
 
         #Compute benchamrk quantities
+        Vol = assemble((1.0 - self.Appr_Heaviside(self.phi_old,self.eps))*dx)
+        Pa = 2.0*sqrt(np.pi*Vol)
+        Pb = assemble(mgrad(self.phi_old)*self.Appr_Delta(self.phi_old,self.eps)*dx)
+        Chi = Pa/Pb
+        Xc = assemble(Expression("x[0]", degree=1)*(1.0 - self.Appr_Heaviside(self.phi_old,self.eps))*dx)/Vol
+        Yc = assemble(Expression("x[1]", degree=1)*(1.0 - self.Appr_Heaviside(self.phi_old,self.eps))*dx)/Vol
+        Uc = assemble(inner(self.u_old,self.e1)*(1.0 - self.Appr_Heaviside(self.phi_old,self.eps))*dx)/Vol
+        Vc = assemble(inner(self.u_old,self.e2)*(1.0 - self.Appr_Heaviside(self.phi_old,self.eps))*dx)/Vol
+        timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
         if(self.reinit_method == 'Non_Conservative_Hyperbolic' or self.reinit_method == 'Non_Conservative_Elliptic'):
-            Vol = assemble((1.0 - CHeaviside(self.phi_old,self.eps))*dx)
-            Pa = 2.0*sqrt(np.pi*Vol)
-            Pb = assemble(CDelta(self.phi_old,self.eps)*dx)
-            Chi = Pa/Pb
-            Xc = assemble(Expression("x[0]", degree=1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
-            Yc = assemble(Expression("x[1]", degree=1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
-            Uc = assemble(inner(self.u_old,self.e1)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
-            Vc = assemble(inner(self.u_old,self.e2)*(1.0 - CHeaviside(self.phi_old,self.eps))*dx)/Vol
             L2_gradphi = sqrt(assemble(inner(grad(self.phi_old),grad(self.phi_old))*dx)/(self.base*self.height))
-            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc,L2_gradphi]
-        elif(self.reinit_method == 'Conservative'):
-            Vol = assemble((1.0 - self.phi_old)*dx)
-            Pa = 2.0*sqrt(np.pi*Vol)
-            Pb = assemble(sqrt(inner(grad(self.phi_old),grad(self.phi_old)))*dx)
-            Chi = Pa/Pb
-            Xc = assemble(Expression("x[0]", degree=1)*(1.0 - self.phi_old)*dx)/Vol
-            Yc = assemble(Expression("x[1]", degree=1)*(1.0 - self.phi_old)*dx)/Vol
-            Uc = assemble(inner(self.u_old,self.e1)*(1.0 - self.phi_old)*dx)/Vol
-            Vc = assemble(inner(self.u_old,self.e2)*(1.0 - self.phi_old)*dx)/Vol
-            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
-
+            timeseries_vec.append(L2_gradphi)
+        
         np.savetxt(self.timeseries, timeseries_vec)
 
     """Execute simulation"""

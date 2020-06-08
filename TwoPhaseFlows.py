@@ -232,8 +232,7 @@ class TwoPhaseFlows:
         solve(self.A1, phi_curr.vector(), self.b1, "gmres", "default")
 
         #Compute normal vector (in case we avoid reconstrution)
-        grad_phi = grad(phi_curr)
-        n_gamma.assign(project(grad_phi/sqrt(inner(grad_phi,grad_phi)), Normal_Space))
+        n_gamma.assign(project(grad(phi_curr)/mgrad(phi_curr), Normal_Space))
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
@@ -320,8 +319,7 @@ class TwoPhaseFlows:
         #Assign the reinitialized level-set to the current solution and
         #update normal vector to the interface (for Navier-Stokes)
         phi_curr.assign(phi_intermediate)
-        grad_phi = grad(phi_curr)
-        n_gamma.assign(project(grad_phi/sqrt(inner(grad_phi,grad_phi)), Normal_Space))
+        n_gamma.assign(project(grad(phi_curr)/mgrad(phi_curr), Normal_Space))
 
 
     """Build and solve the system for Navier-Stokes simulation"""
