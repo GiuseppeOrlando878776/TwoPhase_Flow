@@ -23,6 +23,12 @@ class My_Parameters:
         self.Param.add("NS_Procedure", 'Standard')
         self.Param.add("Interface_Thickness", 0.025)
         self.Param.add("Stabilization_Parameter", 0.1)
+        self.Param.add("Reference_Dimensionalization", 'Dimensional')
+        self.Param.add("Penalization_Reconstruction", 1.0e3)
+        self.Param.add("Extra_Power_Conservative_LevSet", 0.1)
+        self.Param.add("Maximum_subiters_recon", 10)
+        self.Param.add("Tolerance_recon", 1.0e-4)
+        self.Param.add("Saving_Frequency", 50)
 
         try:
             self.file = open(param_name, "r")
@@ -32,6 +38,8 @@ class My_Parameters:
             f.write("Reynolds_number = 35\n")
             f.write("Atwood_number = 0.82\n")
             f.write("Bond_number = 1.0\n")
+            f.write("Gravity = 0.98\n")
+            f.write("Surface_tension = 1.96\n")
             f.write("Lighter_density = 100\n")
             f.write("Smaller_viscosity = 1.0\n")
             f.write("Larger_viscosity = 10.0\n")

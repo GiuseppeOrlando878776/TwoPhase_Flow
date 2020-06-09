@@ -4,7 +4,7 @@ from Auxiliary_Functions import *
 
 import warnings
 
-class TwoPhaseFlows:
+class TwoPhaseFlows():
     """Default constructor"""
     def __init__(self):
         #Define auxiliary dictionaries to set proper stabilization,
@@ -236,7 +236,7 @@ class TwoPhaseFlows:
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
-    def NC_Levelset_hyperbolic_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_gamma, Normal_Space, n_subiters = 10):
+    def NC_Levelset_hyperbolic_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_gamma, Normal_Space, n_subiters = 10, tol = 1.0e-4):
         #Assign current solution
         phi0.assign(phi_curr)
 
@@ -252,7 +252,7 @@ class TwoPhaseFlows:
 
             if(E_old < E):
                 raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
-            elif(E < 1e-4):
+            elif(E < tol):
                 break
 
             #Set previous step solution
@@ -265,7 +265,7 @@ class TwoPhaseFlows:
 
 
     """Build and solve the system for Level set elliptic reinitialization (non-conservative)"""
-    def NC_Levelset_elliptic_reinit(self, phi_curr, phi_intermediate, phi0, n_gamma, Normal_Space, n_subiters = 10):
+    def NC_Levelset_elliptic_reinit(self, phi_curr, phi_intermediate, phi0, n_gamma, Normal_Space, n_subiters = 10, tol = 1.0e-4):
         #Assign current solution
         phi0.assign(phi_curr)
 
@@ -284,7 +284,7 @@ class TwoPhaseFlows:
 
             if(E_old < E):
                 raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
-            elif(E < 1e-4):
+            elif(E < tol):
                 break
 
             #Set previous step solution
@@ -297,10 +297,11 @@ class TwoPhaseFlows:
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
-    def C_Levelset_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_gamma, Normal_Space, n_subiters = 10):
+    def C_Levelset_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_gamma, Normal_Space, n_subiters = 10, tol = 1.0e-4):
+        #Assign the current solution
         phi0.assign(phi_curr)
 
-
+        #Start the loop
         for n in range(n_subiters):
             #Solve the system
             solve(self.F1_reinit == 0, phi_intermediate, \
@@ -310,7 +311,7 @@ class TwoPhaseFlows:
             #Check if convergence has been reached
             error = (((phi_intermediate - phi0)/dt_reinit)**2)*dx
             E = sqrt(assemble(error))
-            if(E < 1e-4):
+            if(E < tol):
                 break
 
             #Prepare for next iteration
@@ -323,7 +324,7 @@ class TwoPhaseFlows:
 
 
     """Build and solve the system for Navier-Stokes simulation"""
-    def solve_Standard_NS_system(self, bcs, w_curr):
+    def solve_Standard_NS_system(self, bcs, w_curr, u_curr, p_curr):
         # Assemble matrices and right-hand sides
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
@@ -335,6 +336,9 @@ class TwoPhaseFlows:
 
         #Solve the system
         solve(self.A2, w_curr.vector(), self.b2, "umfpack")
+
+        #Save in seprated functions
+        (self.u_curr, self.p_curr) = self.w_curr.split(True)
 
 
     """Build and solve the system for Navier-Stokes simulation"""
