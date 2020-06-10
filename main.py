@@ -1,11 +1,12 @@
 from sys import argv
 from Bubble_move import *
+from Raylegh_Taylor import *
 
 def main():
     if(len(argv) >= 2):
         param_test = My_Parameters(argv[1])
     else:
-        param_test = My_Parameters("test.cfg")
+        param_test = My_Parameters("test_RT.cfg")
     param_handler = param_test.get_param()
     try:
         print(str(param_handler["Reinit_Type"]))
@@ -14,7 +15,7 @@ def main():
     except RuntimeError as e:
         print(str(e) +  "\nPlease check configuration file")
 
-    sim = BubbleMove("test.cfg")
+    sim = RayleghTaylor("test_RT.cfg")
     sim.run()
 
 
