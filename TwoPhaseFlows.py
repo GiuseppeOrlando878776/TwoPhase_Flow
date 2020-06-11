@@ -13,6 +13,21 @@ class TwoPhaseFlows():
         self.NS_sol_dict = {'Standard', 'ICT'}
         self.reinit_method_dict = {'Non_Conservative_Hyperbolic', 'Non_Conservative_Elliptic', 'Conservative'}
 
+        #Save solvers and preconditioners settings; in this way we prepare ourselves
+        #in case the option to pass it through configuration file will be added in a future version
+        self.solver_Levset = "gmres"
+        self.precon_Levset = "default"
+        self.solver_recon = "gmres"
+        self.precon_recon = "default"
+        self.solver_Standard_NS = "mumps"
+        self.precon_Standard_NS = "default"
+        self.solver_ICT_1 = "gmres"
+        self.precon_ICT_1 = "default"
+        self.solver_ICT_2 = "gmres"
+        self.precon_ICT_2 = "default"
+        self.solver_ICT_3 = "gmres"
+        self.precon_ICT_3 = "default"
+
         #Declare useful constant vector
         self.e1 = Constant((1.0, 0.0))
         self.e2 = Constant((0.0, 1.0))
@@ -88,12 +103,17 @@ class TwoPhaseFlows():
         #Check the correctness of type
         if(not isinstance(u_curr, Function)):
             raise ValueError("u_curr must be an instance of Function")
+        if(not isinstance(phi_curr, Function)):
+            raise ValueError("phi_curr must be an instance of Function")
+        if(not callable(rho)):
+            raise ValueError("The function to compute the density must be a callable object")
 
         #Define variational problem for step 2
         self.a2_bis = (1.0/rho(phi_curr, eps))*inner(grad(p), grad(q))*dx
         self.L2_bis = (1.0/rho(phi_curr, eps))*inner(grad(p_old), grad(q))*dx - \
                       (1.0/dt)*div(u_curr)*q*dx
 
+        #Declare matrix and vector
         self.A2_bis = PETScMatrix()
         self.b2_bis = PETScVector()
 
@@ -101,14 +121,23 @@ class TwoPhaseFlows():
     """Weak formulation for velocity projection"""
     def ICT_weak_form_3(self, u, v, dt, u_curr, p_curr, p_old, rho, phi_curr, eps):
         #Check the correctness of type
+        if(not isinstance(u_curr, Function)):
+            raise ValueError("u_curr must be an instance of Function")
+        if(not isinstance(p_curr, Function)):
+            raise ValueError("p_curr must be an instance of Function")
         if(not isinstance(p_old, Function)):
             raise ValueError("p_old must be an instance of Function")
+        if(not isinstance(phi_curr, Function)):
+            raise ValueError("phi_curr must be an instance of Function")
+        if(not callable(rho)):
+            raise ValueError("The function to compute the density must be a callable object")
 
         #Define variational problem for step 3
         self.a2_tris = inner(u, v)*dx
         self.L2_tris = inner(u_curr, v)*dx - \
                        dt*inner(grad(p_curr - p_old), v)/rho(phi_curr, eps)*dx
 
+        #Save matrix that will not change during the computations and declare vector
         self.A2_tris = assemble(self.a2_tris)
         self.b2_tris = PETScVector()
 
@@ -144,6 +173,8 @@ class TwoPhaseFlows():
         #Check the correctness of type
         if(not isinstance(phi_old, Function)):
             raise ValueError("phi_old must be an instance of Function")
+        if(not isinstance(u_old, Function)):
+            raise ValueError("u_old must be an instance of Function")
 
         #Save the dimension of the problem
         self.n_dim = mesh.geometry().dim()
@@ -167,10 +198,11 @@ class TwoPhaseFlows():
             #Add the stabilization term
             F1 += self.IP(phi, l, mesh, param)
 
-        #Save corresponding weak forms and declare matrix and vector for solving
+        #Save corresponding weak forms
         self.a1 = lhs(F1)
         self.L1 = rhs(F1)
 
+        #Declare matrix and vector for solving
         self.A1 = PETScMatrix()
         self.b1 = PETScVector()
 
@@ -180,12 +212,14 @@ class TwoPhaseFlows():
         #Check correctness of types
         if(not isinstance(phi0, Function)):
             raise ValueError("phi0 must be an instance of Function")
+        if(not isinstance(phi_curr, Function)):
+            raise ValueError("phi_curr must be an instance of Function")
 
         #Declare weak formulation
         self.a1_reinit = phi/dt_reinit*l*dx
-        self.L1_reinit = phi0/dt_reinit*l*dx + \
-                         signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx -\
-                         beta_reinit*inner(grad(phi0), grad(l))*dx
+        self.L1_reinit = phi0/dt_reinit*l*dx \
+                       + signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx \
+                       - beta_reinit*inner(grad(phi0), grad(l))*dx
 
         #Save the matrix that will not change and declare vector
         self.A1_reinit = assemble(self.a1_reinit)
@@ -195,14 +229,16 @@ class TwoPhaseFlows():
     """Weak form non-conservative reinitialization (elliptic version)"""
     def NCLSM_elliptic_weak_form(self, phi, l, phi0, phi_curr, CDelta, eps_reinit, beta_reinit = 1.0e3):
         #Check correctness of types
+        if(not isinstance(phi0, Function)):
+            raise ValueError("phi0 must be an instance of Function")
         if(not isinstance(phi_curr, Function)):
             raise ValueError("phi_curr must be an instance of Function")
         if(not callable(CDelta)):
             raise ValueError("CDelta must be a callable object")
 
         #Declare weak formulation
-        self.a1_reinit = inner(grad(phi), grad(l))*dx + \
-                         beta_reinit*phi*CDelta(phi_curr, eps_reinit)*dx
+        self.a1_reinit = inner(grad(phi), grad(l))*dx \
+                       + beta_reinit*phi*CDelta(phi_curr, eps_reinit)*dx
         self.L1_reinit = inner(grad(phi0)/mgrad(phi0), grad(l))*dx
 
         #Declare matrix and vector for solution
@@ -215,6 +251,10 @@ class TwoPhaseFlows():
         #Check correctness of types
         if(not isinstance(phi_intermediate, Function)):
             raise ValueError("phi_intermediate must be an instance of Function")
+        if(not isinstance(phi0, Function)):
+            raise ValueError("phi0 must be an instance of Function")
+        if(not isinstance(n_gamma, Function)):
+            raise ValueError("n_gamma must be an instance of Function")
 
         #Save variational formulation
         self.F1_reinit = (phi_intermediate - phi0)/dt_reinit*l*dx \
@@ -223,28 +263,26 @@ class TwoPhaseFlows():
 
 
     """Build the system for Level set simulation"""
-    def solve_Levelset_system(self, phi_curr, n_gamma, Normal_Space):
+    def solve_Levelset_system(self, phi_curr):
         # Assemble matrix and right-hand side
         assemble(self.a1, tensor = self.A1)
         assemble(self.L1, tensor = self.b1)
 
         #Solve the level-set system
-        solve(self.A1, phi_curr.vector(), self.b1, "gmres", "default")
-
-        #Compute normal vector (in case we avoid reconstrution)
-        n_gamma.assign(project(grad(phi_curr)/mgrad(phi_curr), Normal_Space))
+        solve(self.A1, phi_curr.vector(), self.b1, self.solver_Levset, self.precon_Levset)
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
-    def NC_Levelset_hyperbolic_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_gamma, Normal_Space, n_subiters = 10, tol = 1.0e-4):
+    def NC_Levelset_hyperbolic_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_subiters = 10, tol = 1.0e-4):
         #Assign current solution
         phi0.assign(phi_curr)
 
+        #Start loop
         E_old = 1e10
         for n in range(n_subiters):
             #Assemble and solve the system
             assemble(self.L1_reinit, tensor = self.b1_reinit)
-            solve(self.A1_reinit, phi_intermediate.vector(), self.b1_reinit, "cg" , "icc")
+            solve(self.A1_reinit, phi_intermediate.vector(), self.b1_reinit, self.solver_recon , self.precon_recon)
 
             #Compute the error and check no divergence
             error = (((phi_intermediate - phi0)/dt_reinit)**2)*dx
@@ -258,25 +296,24 @@ class TwoPhaseFlows():
             #Set previous step solution
             phi0.assign(phi_intermediate)
 
-        #Assign the reinitialized level-set to the current solution and
-        #update normal vector to the interface (for Navier-Stokes)
+        #Assign the reinitialized level-set to the current solution
         phi_curr.assign(phi_intermediate)
-        n_gamma.assign(project(grad(phi_curr)/mgrad(phi_curr), Normal_Space))
 
 
     """Build and solve the system for Level set elliptic reinitialization (non-conservative)"""
-    def NC_Levelset_elliptic_reinit(self, phi_curr, phi_intermediate, phi0, n_gamma, Normal_Space, n_subiters = 10, tol = 1.0e-4):
+    def NC_Levelset_elliptic_reinit(self, phi_curr, phi_intermediate, phi0, n_subiters = 10, tol = 1.0e-4):
         #Assign current solution
         phi0.assign(phi_curr)
 
         #Build the matrix that will not change during the procedure
         assemble(self.a1_reinit, tensor = self.A1_reinit)
 
+        #Start the loop
         E_old = 1e10
         for n in range(n_subiters):
             #Assemble and solve the system
             assemble(self.L1_reinit, tensor = self.b1_reinit)
-            solve(self.A1_reinit, phi_intermediate.vector(), self.b1_reinit, "gmres" , "default")
+            solve(self.A1_reinit, phi_intermediate.vector(), self.b1_reinit, self.solver_recon , self.precon_recon)
 
             #Compute the error and check no divergence
             error = ((phi_intermediate - phi0)**2)*dx
@@ -290,14 +327,12 @@ class TwoPhaseFlows():
             #Set previous step solution
             phi0.assign(phi_intermediate)
 
-        #Assign the reinitialized level-set to the current solution and
-        #update normal vector to the interface (for Navier-Stokes)
+        #Assign the reinitialized level-set to the current solution
         phi_curr.assign(phi_intermediate)
-        n_gamma.assign(project(grad(phi_curr)/mgrad(phi_curr), Normal_Space))
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
-    def C_Levelset_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_gamma, Normal_Space, n_subiters = 10, tol = 1.0e-4):
+    def C_Levelset_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_subiters = 10, tol = 1.0e-4):
         #Assign the current solution
         phi0.assign(phi_curr)
 
@@ -305,7 +340,7 @@ class TwoPhaseFlows():
         for n in range(n_subiters):
             #Solve the system
             solve(self.F1_reinit == 0, phi_intermediate, \
-                  solver_parameters={"newton_solver": {'linear_solver': 'gmres', "preconditioner": "default"}}, \
+                  solver_parameters={"newton_solver": {'linear_solver': self.solver_recon, "preconditioner": self.precon_recon}}, \
                   form_compiler_parameters={"optimize": True})
 
             #Check if convergence has been reached
@@ -317,14 +352,12 @@ class TwoPhaseFlows():
             #Prepare for next iteration
             phi0.assign(phi_intermediate)
 
-        #Assign the reinitialized level-set to the current solution and
-        #update normal vector to the interface (for Navier-Stokes)
+        #Assign the reinitialized level-set to the current solution
         phi_curr.assign(phi_intermediate)
-        n_gamma.assign(project(grad(phi_curr)/mgrad(phi_curr), Normal_Space))
 
 
     """Build and solve the system for Navier-Stokes simulation"""
-    def solve_Standard_NS_system(self, bcs, w_curr, u_curr, p_curr):
+    def solve_Standard_NS_system(self, bcs, w_curr):
         # Assemble matrices and right-hand sides
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
@@ -335,10 +368,7 @@ class TwoPhaseFlows():
             bc.apply(self.b2)
 
         #Solve the system
-        solve(self.A2, w_curr.vector(), self.b2, "umfpack")
-
-        #Save in seprated functions
-        (self.u_curr, self.p_curr) = self.w_curr.split(True)
+        solve(self.A2, w_curr.vector(), self.b2, self.solver_Standard_NS, self.precon_Standard_NS)
 
 
     """Build and solve the system for Navier-Stokes simulation"""
@@ -362,4 +392,4 @@ class TwoPhaseFlows():
 
         #Assemble and solve the third system
         assemble(self.L2_tris, tensor = self.b2_tris)
-        solve(self.A2_tris, u_curr.vector(), self.b2_tris, "cg", "default")
+        solve(self.A2_tris, u_curr.vector(), self.b2_tris, "gmres", "default")

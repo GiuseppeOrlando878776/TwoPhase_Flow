@@ -2,16 +2,16 @@ from TwoPhaseFlows import *
 from My_Parameters import My_Parameters
 
 from sys import exit
+import os
 
 class RayleghTaylor(TwoPhaseFlows):
     """Class constructor"""
     def __init__(self, param_name):
         """
         Param --- class Parameters to store desired configuration
-        rho1  --- Lighter density
-        rho2  --- Heavier density
-        mu1   --- Smaller viscosity
-        mu2   --- Larger viscosity
+        mu1   --- Viscosity_lighter_fluid
+        mu2   --- Viscosity_heavier_fluid
+        g     --- Gravity force
         dt    --- Specified time step
         t_end --- End time of the simulation
         deg   --- Polynomial degree
@@ -22,27 +22,29 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #MPI settings
         self.comm = MPI.comm_world
-        self.rank = MPI.rank(comm)
+        self.rank = MPI.rank(self.comm)
 
         #Start with the specific problem settings
         self.Param = My_Parameters(param_name).get_param()
 
+        #Check coerence of dimensional choice
+        assert self.Param["Reference_Dimensionalization"] == 'Non_Dimensional', \
+        "This instance of the problem 'RayleghTaylor' works in a non-dimensional framework"
+
         try:
-            self.rho1  = float(self.Param["Lighter_density"])
-            self.rho2  = float(self.Param["Heavier_density"])
-            self.mu1   = float(self.Param["Smaller_viscosity"])
-            self.mu2   = float(self.Param["Larger_viscosity"])
-            self.g     = float(self.Param["Gravity"])
-            self.dt    = float(self.Param["Time_step"])
-            self.t_end = float(self.Param["End_time"])
+            self.set_type = self.Param["Settings_Type"]
+            self.mu1      = float(self.Param["Viscosity_lighter_fluid"])
+            self.mu2      = float(self.Param["Viscosity_heavier_fluid"])
+            self.g        = float(self.Param["Gravity"])
+            self.dt       = float(self.Param["Time_step"])
+            self.t_end    = float(self.Param["End_time"])
         except RuntimeError as e:
-            print(str(e) +  "\nPlease check configuration file")
+            if(self.rank == 0):
+                print(str(e) +  "\nPlease check configuration file")
             exit(1)
 
-        if(self.rho2 < self.rho1):
-            warnings.warn("The heavier density is not greater than the lighter one")
-        if(self.mu2 < self.mu1):
-            warning.warn("The larger viscosity is not greter than the smaller one")
+        if(self.set_type not in {'Physical', 'Parameters'}):
+            raise ValueError("Unknown value for settings values")
 
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
@@ -61,23 +63,60 @@ class RayleghTaylor(TwoPhaseFlows):
         #Check correctness of reinitialization method
         assert self.reinit_method in self.reinit_method_dict, "Reinitialization method not available"
 
-        #Check coerence of dimensional choice
-        assert self.Param["Reference_Dimensionalization"] == 'Non_Dimensional', \
-        "The problem 'RayleghTaylor' works in a non-dimensional framework"
+        #Check correctness of data read
+        if(self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or \
+           self.mu2 < DOLFIN_EPS or self.g < DOLFIN_EPS):
+            raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
 
-        #Compute the Atwood number
-        self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
+        #Set more adequate solvers in case of one core execution
+        if(MPI.size(self.comm) == 1):
+            if(self.NS_sol_method == 'Standard'):
+                self.solver_Standard_NS = "umfpack"
+            elif(self.NS_sol_method == 'ICT'):
+                self.solver_ICT_3 = "cg"
+                self.precon_ICT_3 = "icc"
+            if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+                self.solver_recon = "cg"
 
-        #Compute Reynolds number
-        self.L0 = 1.0
-        self.Re = self.rho1*self.L0*np.sqrt(self.At*self.L0*self.g)/self.mu1
+        self.L0 = 1.0 #Reference length
+        #Compute the Atwood number and the Reynolds number according to how the settings has been imposed
+        if(self.set_type == 'Physical'):
+            try:
+                self.rho1 = float(self.Param["Lighter_density"])
+                self.rho2 = float(self.Param["Heavier_density"])
+                self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
+                if(self.rho2 < self.rho1):
+                    warnings.warn("The heavier density is not greater than the lighter one")
+                self.Re = self.rho1*self.L0*np.sqrt(self.At*self.L0*self.g)/self.mu1
+                assert self.Re > 1.0, "Invalid Reynolds number computed"
+            except RuntimeError as e:
+                if(self.rank == 0):
+                    print(str(e) +  "\nPlease check configuration file")
+                exit(1)
+        elif(self.set_type == 'Parameters'):
+            try:
+                self.At = float(self.Param["Atwood_number"])
+                if(self.At < 0.0 or self.At > 1.0):
+                    raise ValueError("Invalid Atwood number")
+                self.Re = float(self.Param["Reynolds_number"])
+                if(self.Re < 1.0):
+                    raise ValueError("Invalid Reynolds number")
+                self.rho1 = self.Re*self.mu1/(self.L0*np.sqrt(self.At*self.L0*self.g))
+                self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
+            except RuntimeError as e:
+                if(self.rank == 0):
+                    print(str(e) +  "\nPlease check configuration file")
+                exit(1)
 
         #Compute density and viscosity ratio
         self.rho2_rho1 = self.rho2/self.rho1
         self.mu2_mu1   = self.mu2/self.mu1
 
-        #Compute reference time
-        self.t0 = np.sqrt(self.L0*self.g)
+        #Compute reference time: we assume that self.dt is the one that the user wants to use in the weak
+        #form (the step) while self.t_end is the dimensional final time
+        self.U0 = np.sqrt(self.L0*self.At*self.g)
+        self.t0 = self.L0/self.U0
+        self.t_stop = self.t_end/self.t0
 
         #Prepare useful variables for stabilization
         self.switcher_parameter = {self.stab_method: None}
@@ -92,7 +131,7 @@ class RayleghTaylor(TwoPhaseFlows):
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
 
-        #Set parameter for standard output
+        #Set parameter for standard output (only rank 0 will print)
         set_log_level(self.Param["Log_Level"] if self.rank == 0 else 1000)
 
         #Detect properties for reconstrution step
@@ -107,29 +146,34 @@ class RayleghTaylor(TwoPhaseFlows):
             self.base   = float(self.Param["Base"])
             self.height = float(self.Param["Height"])
         except RuntimeError as e:
-            print(str(e) +  "\nPlease check configuration file")
+            if(self.rank == 0):
+                print(str(e) +  "\nPlease check configuration file")
             exit(1)
         self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.base, self.height), \
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
 
         #Parameters for reinitialization steps
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            hmin = MPI.min(self.mesh.hmin())
+            hmin = MPI.min(self.comm, self.mesh.hmin())
             self.eps = self.Param["Interface_Thickness"]
+            if(self.eps < DOLFIN_EPS):
+                raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
-                                                                    #and so a very small step is needed
+            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin/self.U0)) #We choose an explicit treatment to keep the linearity
+                                                                           #and so a very small step is needed
         elif(self.reinit_method == 'Non_Conservative_Elliptic'):
             self.eps = self.Param["Interface_Thickness"]
+            if(self.eps < DOLFIN_EPS):
+                raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
             self.beta_reinit = Constant(self.Param["Penalization_Reconstruction"])
             self.gamma_reinit = None
             self.dt_reinit = None
         elif(self.reinit_method == 'Conservative'):
-            hmin = self.mesh.hmin()
+            hmin = MPI.min(self.comm, self.mesh.hmin())
             d = self.Param["Extra_Power_Conservative_LevSet"]
-            self.dt_reinit = Constant(0.5*hmin**(1.0 + d))
-            self.eps = Constant(0.5*hmin**(1.0 - d))
+            self.dt_reinit = Constant(0.5*(hmin**(1.0 + d)))
+            self.eps = Constant(0.5*(hmin**(1.0 - d)))
             self.gamma_reinit = None
             self.beta_reinit = None
 
@@ -141,7 +185,6 @@ class RayleghTaylor(TwoPhaseFlows):
         if(self.NS_sol_method == 'Standard'):
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
-        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         if(self.NS_sol_method == 'Standard'):
@@ -170,11 +213,14 @@ class RayleghTaylor(TwoPhaseFlows):
         self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
                                                  #reinitialization and it is also useful for clearness
 
-        #Define function and vector for plotting level-set and computing volume
+        #Define function and vector for saving purposes
         self.rho_interp = Function(self.Q)
 
-        #Declare function for normal vector
-        self.n = Function(self.Q2)
+        #Declare function for normal vector (in case of conservative level-set method)
+        self.n = None
+        if(self.reinit_method == 'Conservative'):
+            self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+            self.n = Function(self.Q2)
 
         #Prepare useful dictionaries in order to avoid too many ifs
         self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form, \
@@ -191,13 +237,13 @@ class RayleghTaylor(TwoPhaseFlows):
                                       'Conservative': self.C_Levelset_reinit}
         self.switcher_arguments_reinit_solve = {'Non_Conservative_Hyperbolic': \
                                                 (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
-                                                 self.n, self.Q2, self.max_subiters, self.tol_recon), \
+                                                 self.max_subiters, self.tol_recon), \
                                                 'Non_Conservative_Elliptic': \
                                                 (self.phi_curr, self.phi_intermediate, self.phi0, \
-                                                 self.n, self.Q2, self.max_subiters, self.tol_recon), \
+                                                 self.max_subiters, self.tol_recon), \
                                                 'Conservative': \
-                                                (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit,
-                                                 self.n, self.Q2, self.max_subiters, self.tol_recon)}
+                                                (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
+                                                 self.max_subiters, self.tol_recon)}
 
     """Weak formulation for Navier-Stokes"""
     def NS_weak_form(self):
@@ -240,10 +286,11 @@ class RayleghTaylor(TwoPhaseFlows):
         self.u_old.assign(interpolate(Constant((0.0,0.0)), self.V))
         self.p_old.assign(interpolate(Constant(0.0), self.P))
         if(self.reinit_method == 'Non_Conservative_Elliptic' or self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            f = Expression("tanh((x[1] - 2.0 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))", degree = 8)
+            f = Expression("tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))", A = self.height/2.0, degree = 8)
             self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
-            f = Expression("1.0/(1.0 + exp(tanh((x[1] - 2.0 - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))/eps))", eps = self.eps, degree = 8)
+            f = Expression("1.0/(1.0 + exp(-tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))/eps))", \
+                            A = self.height/2.0,eps = self.eps, degree = 8)
             self.phi_old.assign(interpolate(f, self.Q))
 
 
@@ -257,10 +304,8 @@ class RayleghTaylor(TwoPhaseFlows):
                         DirichletBC(self.V.sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
 
         #Useful dictionaries in order to avoid too many ifs
-        self.switcher_NS_solve = {'Standard': self.solve_Standard_NS_system, \
-                                  'ICT': self.solve_ICT_NS_systems}
-        self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr, self.u_curr, self.p_curr), \
-                                            'ICT': (self.bcs, self.u_curr, self.p_curr)}
+        self.switcher_NS_solve = {'Standard': self.solve_Standard_NS_system, 'ICT': self.solve_ICT_NS_systems}
+        self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr), 'ICT': (self.bcs, self.u_curr, self.p_curr)}
 
 
     """Auxiliary function to select proper Heavised approximation"""
@@ -307,8 +352,9 @@ class RayleghTaylor(TwoPhaseFlows):
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
         except ValueError as e:
-            print(str(e))
-            print("Aborting simulation...")
+            if(self.rank == 0):
+                print(str(e))
+                print("Aborting simulation...")
             exit(1)
 
 
@@ -340,34 +386,40 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #File for plotting
         save_iters = self.Param["Saving_Frequency"]
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim116/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim116/rho.pvd')
+
+        self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
+        self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
 
         #Save initial state and start loop
         self.plot_and_save()
         self.t += self.dt
-        while self.t <= self.t_end:
+        while self.t <= self.t_stop:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
             self.n_iter += 1
 
             #Solve level-set
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
-            self.solve_Levelset_system(self.phi_curr, self.n, self.Q2)
+            self.solve_Levelset_system(self.phi_curr)
             end()
 
             #Solve Level-set reinit
             try:
                 begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
+                if(self.reinit_method == 'Conservative'):
+                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2))
                 self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
                 end()
             except Exception as e:
-                print(str(e))
-                print("Aborting simulation...")
+                if(self.rank == 0):
+                    print(str(e))
+                    print("Aborting simulation...")
                 exit(1)
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
             self.switcher_NS_solve[self.NS_sol_method](*self.switcher_arguments_NS_solve[self.NS_sol_method])
+            if(self.NS_sol_method == 'Standard'):
+                (self.u_curr, self.p_curr) = self.w_curr.split(True)
             end()
 
             #Prepare to next step assign previous-step solution
@@ -383,4 +435,4 @@ class RayleghTaylor(TwoPhaseFlows):
 
             end()
 
-            self.t += self.dt if self.t + self.dt <= self.t_end or abs(self.t - self.t_end) < DOLFIN_EPS else self.t_end
+            self.t += self.dt if self.t + self.dt <= self.t_stop or abs(self.t - self.t_stop) < DOLFIN_EPS else self.t_stop
