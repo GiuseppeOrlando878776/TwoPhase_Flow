@@ -20,6 +20,10 @@ class RayleghTaylor(TwoPhaseFlows):
         #Call the base class constructor
         super(RayleghTaylor, self).__init__()
 
+        #MPI settings
+        self.comm = MPI.comm_world
+        self.rank = MPI.rank(comm)
+
         #Start with the specific problem settings
         self.Param = My_Parameters(param_name).get_param()
 
@@ -89,7 +93,7 @@ class RayleghTaylor(TwoPhaseFlows):
         self.DT = Constant(self.dt)
 
         #Set parameter for standard output
-        set_log_level(self.Param["Log_Level"])
+        set_log_level(self.Param["Log_Level"] if self.rank == 0 else 1000)
 
         #Detect properties for reconstrution step
         self.tol_recon = self.Param["Tolerance_recon"]
@@ -110,7 +114,7 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #Parameters for reinitialization steps
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            hmin = self.mesh.hmin()
+            hmin = MPI.min(self.mesh.hmin())
             self.eps = self.Param["Interface_Thickness"]
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
@@ -209,8 +213,8 @@ class RayleghTaylor(TwoPhaseFlows):
         self.a2 = lhs(F2)
         self.L2 = rhs(F2)
 
-        self.A2 = Matrix()
-        self.b2 = Vector()
+        self.A2 = PETScMatrix()
+        self.b2 = PETScVector()
 
 
     """Weak formulation for tentative velocity"""
@@ -226,8 +230,8 @@ class RayleghTaylor(TwoPhaseFlows):
         self.a2 = lhs(F2)
         self.L2 = rhs(F2)
 
-        self.A2 = Matrix()
-        self.b2 = Vector()
+        self.A2 = PETScMatrix()
+        self.b2 = PETScVector()
 
 
     """Set the proper initial condition"""
@@ -336,8 +340,8 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #File for plotting
         save_iters = self.Param["Saving_Frequency"]
-        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim115/u.pvd')
-        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim115/rho.pvd')
+        self.vtkfile_u = File('/u/archive/laureandi/orlando/Sim116/u.pvd')
+        self.vtkfile_rho = File('/u/archive/laureandi/orlando/Sim116/rho.pvd')
 
         #Save initial state and start loop
         self.plot_and_save()

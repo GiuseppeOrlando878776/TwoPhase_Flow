@@ -47,8 +47,8 @@ class TwoPhaseFlows():
         self.a2 = lhs(F2)
         self.L2 = rhs(F2)
 
-        self.A2 = Matrix()
-        self.b2 = Vector()
+        self.A2 = PETScMatrix()
+        self.b2 = PETScVector()
 
 
     """Weak formulation for tentative velocity"""
@@ -79,8 +79,8 @@ class TwoPhaseFlows():
         self.a2 = lhs(F2)
         self.L2 = rhs(F2)
 
-        self.A2 = Matrix()
-        self.b2 = Vector()
+        self.A2 = PETScMatrix()
+        self.b2 = PETScVector()
 
 
     """Weak formulation for pressure correction"""
@@ -94,8 +94,8 @@ class TwoPhaseFlows():
         self.L2_bis = (1.0/rho(phi_curr, eps))*inner(grad(p_old), grad(q))*dx - \
                       (1.0/dt)*div(u_curr)*q*dx
 
-        self.A2_bis = Matrix()
-        self.b2_bis = Vector()
+        self.A2_bis = PETScMatrix()
+        self.b2_bis = PETScVector()
 
 
     """Weak formulation for velocity projection"""
@@ -110,7 +110,7 @@ class TwoPhaseFlows():
                        dt*inner(grad(p_curr - p_old), v)/rho(phi_curr, eps)*dx
 
         self.A2_tris = assemble(self.a2_tris)
-        self.b2_tris = Vector()
+        self.b2_tris = PETScVector()
 
 
     """Interior penalty method"""
@@ -171,8 +171,8 @@ class TwoPhaseFlows():
         self.a1 = lhs(F1)
         self.L1 = rhs(F1)
 
-        self.A1 = Matrix()
-        self.b1 = Vector()
+        self.A1 = PETScMatrix()
+        self.b1 = PETScVector()
 
 
     """Weak form non-conservative reinitialization (hyperbolic version)"""
@@ -189,7 +189,7 @@ class TwoPhaseFlows():
 
         #Save the matrix that will not change and declare vector
         self.A1_reinit = assemble(self.a1_reinit)
-        self.b1_reinit = Vector()
+        self.b1_reinit = PETScVector()
 
 
     """Weak form non-conservative reinitialization (elliptic version)"""
@@ -206,8 +206,8 @@ class TwoPhaseFlows():
         self.L1_reinit = inner(grad(phi0)/mgrad(phi0), grad(l))*dx
 
         #Declare matrix and vector for solution
-        self.A1_reinit = Matrix()
-        self.b1_reinit = Vector()
+        self.A1_reinit = PETScMatrix()
+        self.b1_reinit = PETScVector()
 
 
     """Weak form conservative reinitialization"""
