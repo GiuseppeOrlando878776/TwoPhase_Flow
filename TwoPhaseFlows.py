@@ -238,7 +238,7 @@ class TwoPhaseFlows():
 
         #Declare weak formulation
         self.a1_reinit = inner(grad(phi), grad(l))*dx \
-                       + beta_reinit*phi*CDelta(phi_curr, eps_reinit)*dx
+                       + beta_reinit*phi*CDelta(phi_curr, eps_reinit)*l*dx
         self.L1_reinit = inner(grad(phi0)/mgrad(phi0), grad(l))*dx
 
         #Declare matrix and vector for solution

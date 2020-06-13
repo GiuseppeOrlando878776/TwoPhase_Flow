@@ -46,6 +46,14 @@ class RayleghTaylor(TwoPhaseFlows):
         if(self.set_type not in {'Physical', 'Parameters'}):
             raise ValueError("Unknown value for settings values")
 
+        #Check correctness of data read
+        if(self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or \
+           self.mu2 < DOLFIN_EPS or self.g < DOLFIN_EPS):
+            raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
+        if(self.dt > self.t_end):
+            raise ValueError("Time-step greater than final time")
+
+
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
         #and so they are present for sure
@@ -62,11 +70,6 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #Check correctness of reinitialization method
         assert self.reinit_method in self.reinit_method_dict, "Reinitialization method not available"
-
-        #Check correctness of data read
-        if(self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or \
-           self.mu2 < DOLFIN_EPS or self.g < DOLFIN_EPS):
-            raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
 
         #Set more adequate solvers in case of one core execution
         if(MPI.size(self.comm) == 1):
@@ -85,7 +88,7 @@ class RayleghTaylor(TwoPhaseFlows):
                 self.rho1 = float(self.Param["Lighter_density"])
                 self.rho2 = float(self.Param["Heavier_density"])
                 self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
-                if(self.rho2 < self.rho1):
+                if(self.rho2 < self.rho1 and self.rank == 0):
                     warnings.warn("The heavier density is not greater than the lighter one")
                 self.Re = self.rho1*self.L0*np.sqrt(self.At*self.L0*self.g)/self.mu1
                 assert self.Re > 1.0, "Invalid Reynolds number computed"
@@ -152,31 +155,6 @@ class RayleghTaylor(TwoPhaseFlows):
         self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.base, self.height), \
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
 
-        #Parameters for reinitialization steps
-        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            hmin = MPI.min(self.comm, self.mesh.hmin())
-            self.eps = self.Param["Interface_Thickness"]
-            if(self.eps < DOLFIN_EPS):
-                raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
-            self.gamma_reinit = Constant(hmin)
-            self.beta_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin/self.U0)) #We choose an explicit treatment to keep the linearity
-                                                                           #and so a very small step is needed
-        elif(self.reinit_method == 'Non_Conservative_Elliptic'):
-            self.eps = self.Param["Interface_Thickness"]
-            if(self.eps < DOLFIN_EPS):
-                raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
-            self.beta_reinit = Constant(self.Param["Penalization_Reconstruction"])
-            self.gamma_reinit = None
-            self.dt_reinit = None
-        elif(self.reinit_method == 'Conservative'):
-            hmin = MPI.min(self.comm, self.mesh.hmin())
-            d = self.Param["Extra_Power_Conservative_LevSet"]
-            self.dt_reinit = Constant(0.5*(hmin**(1.0 + d)))
-            self.eps = Constant(0.5*(hmin**(1.0 - d)))
-            self.gamma_reinit = None
-            self.beta_reinit = None
-
         #Define FE spaces
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
         Pelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
@@ -217,33 +195,70 @@ class RayleghTaylor(TwoPhaseFlows):
         self.rho_interp = Function(self.Q)
 
         #Declare function for normal vector (in case of conservative level-set method)
-        self.n = None
         if(self.reinit_method == 'Conservative'):
             self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
             self.n = Function(self.Q2)
 
-        #Prepare useful dictionaries in order to avoid too many ifs
-        self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form, \
-                                     'Non_Conservative_Elliptic': self.NCLSM_elliptic_weak_form, \
-                                     'Conservative': self.CLSM_weak_form}
-        self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
-                                               (self.phi, self.l, self.phi0, self.phi_curr, self.dt_reinit, self.gamma_reinit, self.beta_reinit), \
-                                               'Non_Conservative_Elliptic': \
-                                                (self.phi, self.l, self.phi0, self.phi_curr, self.Appr_Delta, self.eps, self.beta_reinit), \
-                                               'Conservative': \
-                                               (self.phi_intermediate, self.l, self.phi0, self.n, self.dt_reinit, self.eps)}
-        self.switcher_reinit_solve = {'Non_Conservative_Hyperbolic': self.NC_Levelset_hyperbolic_reinit, \
-                                      'Non_Conservative_Elliptic': self.NC_Levelset_elliptic_reinit, \
-                                      'Conservative': self.C_Levelset_reinit}
-        self.switcher_arguments_reinit_solve = {'Non_Conservative_Hyperbolic': \
-                                                (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
-                                                 self.max_subiters, self.tol_recon), \
-                                                'Non_Conservative_Elliptic': \
-                                                (self.phi_curr, self.phi_intermediate, self.phi0, \
-                                                 self.max_subiters, self.tol_recon), \
-                                                'Conservative': \
-                                                (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
-                                                 self.max_subiters, self.tol_recon)}
+
+        #Parameters for reinitialization steps
+        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+            hmin = MPI.min(self.comm, self.mesh.hmin())
+            self.eps = self.Param["Interface_Thickness"]
+            if(self.eps < DOLFIN_EPS):
+                raise  ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
+            self.gamma_reinit = Constant(hmin)
+            self.beta_reinit = Constant(0.0625*hmin)
+            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                    #and so a very small step is needed
+
+            #Prepare useful dictionary in order to avoid too many ifs
+            #Dictionary for reinitialization weak form
+            self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form}
+            self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
+                                                   (self.phi, self.l, self.phi0, self.phi_curr, self.dt_reinit, \
+                                                    self.gamma_reinit, self.beta_reinit)}
+
+            #Dictionary for reinitialization solution
+            self.switcher_reinit_solve = {'Non_Conservative_Hyperbolic': self.NC_Levelset_hyperbolic_reinit}
+            self.switcher_arguments_reinit_solve = {'Non_Conservative_Hyperbolic': \
+                                                    (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
+                                                     self.max_subiters, self.tol_recon)}
+        elif(self.reinit_method == 'Non_Conservative_Elliptic'):
+            self.eps = self.Param["Interface_Thickness"]
+            if(self.eps < DOLFIN_EPS):
+                raise  ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
+            self.beta_reinit = Constant(self.Param["Penalization_Reconstruction"])
+
+            #Prepare useful dictionary in order to avoid too many ifs
+            #Dictionary for reinitialization weak form
+            self.switcher_reinit_varf = {'Non_Conservative_Elliptic': self.NCLSM_elliptic_weak_form}
+            self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
+                                                   (self.phi, self.l, self.phi0, self.phi_curr, self.Appr_Delta, \
+                                                    self.eps, self.beta_reinit)}
+
+            #Dictionary for reinitialization solution
+            self.switcher_reinit_solve = {'Non_Conservative_Elliptic': self.NC_Levelset_elliptic_reinit}
+            self.switcher_arguments_reinit_solve = {'Non_Conservative_Elliptic': \
+                                                    (self.phi_curr, self.phi_intermediate, self.phi0, \
+                                                     self.max_subiters, self.tol_recon)}
+        elif(self.reinit_method == 'Conservative'):
+            hmin = MPI.min(self.comm, self.mesh.hmin())
+            d = self.Param["Extra_Power_Conservative_LevSet"]
+            self.dt_reinit = Constant(0.5*hmin**(1.0 + d))
+            self.eps = Constant(0.5*hmin**(1.0 - d))
+
+            #Prepare useful dictionary in order to avoid too many ifs
+            #Dictionary for reinitialization weak form
+            self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
+            self.switcher_arguments_reinit_varf = {'Conservative': \
+                                                   (self.phi_intermediate, self.l, self.phi0, self.n, self.dt_reinit, self.eps)}
+
+            #Dictionary for reinitialization solution
+            self.switcher_reinit_solve = {'Conservative': self.C_Levelset_reinit}
+            self.switcher_arguments_reinit_solve = {'Conservative': \
+                                                    (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
+                                                     self.max_subiters, self.tol_recon)}
+
 
     """Weak formulation for Navier-Stokes"""
     def NS_weak_form(self):
@@ -299,13 +314,17 @@ class RayleghTaylor(TwoPhaseFlows):
         if(self.NS_sol_method == 'Standard'):
             self.bcs = [DirichletBC(self.W.sub(0), Constant((0.0,0.0)),  'near(x[1], 0.0) || near(x[1], 4.0)'), \
                         DirichletBC(self.W.sub(0).sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
+
+            #Useful dictionaries in order to avoid too many ifs
+            self.switcher_NS_solve = {'Standard': self.solve_Standard_NS_system}
+            self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr)}
         elif(self.NS_sol_method == 'ICT'):
             self.bcs = [DirichletBC(self.V, Constant((0.0,0.0)),  'near(x[1], 0.0) || near(x[1], 4.0)'), \
                         DirichletBC(self.V.sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
 
-        #Useful dictionaries in order to avoid too many ifs
-        self.switcher_NS_solve = {'Standard': self.solve_Standard_NS_system, 'ICT': self.solve_ICT_NS_systems}
-        self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr), 'ICT': (self.bcs, self.u_curr, self.p_curr)}
+            #Useful dictionaries in order to avoid too many ifs
+            self.switcher_NS_solve = {'ICT': self.solve_ICT_NS_systems}
+            self.switcher_arguments_NS_solve = {'ICT': (self.bcs, self.u_curr, self.p_curr)}
 
 
     """Auxiliary function to select proper Heavised approximation"""
@@ -386,7 +405,6 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #File for plotting
         save_iters = self.Param["Saving_Frequency"]
-
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
 
