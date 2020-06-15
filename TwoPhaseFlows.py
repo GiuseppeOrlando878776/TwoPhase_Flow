@@ -16,17 +16,17 @@ class TwoPhaseFlows():
         #Save solvers and preconditioners settings; in this way we prepare ourselves
         #in case the option to pass it through configuration file will be added in a future version
         self.solver_Levset = "gmres"
-        self.precon_Levset = "default"
+        self.precon_Levset = "hypre_amg"
         self.solver_recon = "gmres"
-        self.precon_recon = "default"
+        self.precon_recon = "hypre_amg"
         self.solver_Standard_NS = "mumps"
         self.precon_Standard_NS = "default"
         self.solver_ICT_1 = "gmres"
-        self.precon_ICT_1 = "default"
+        self.precon_ICT_1 = "hypre_amg"
         self.solver_ICT_2 = "gmres"
-        self.precon_ICT_2 = "default"
+        self.precon_ICT_2 = "hypre_amg"
         self.solver_ICT_3 = "gmres"
-        self.precon_ICT_3 = "default"
+        self.precon_ICT_3 = "hypre_amg"
 
         #Declare useful constant vector
         self.e1 = Constant((1.0, 0.0))
@@ -67,10 +67,12 @@ class TwoPhaseFlows():
 
 
     """Weak formulation for tentative velocity"""
-    def ICT_weak_form_1(self, u, v, u_old, dt, rho, mu, phi_curr, phi_old, eps, g, sigma, n_gamma, CDelta):
+    def ICT_weak_form_1(self, u, v, u_old, p_old, dt, rho, mu, phi_curr, phi_old, eps, g, sigma, n_gamma, CDelta):
         #Check the correctness of type
         if(not isinstance(u_old, Function)):
             raise ValueError("u_old must be an instance of Function")
+        if(not isinstance(p_old, Function)):
+            raise ValueError("p_old must be an instance of Function")
         if(not isinstance(phi_curr, Function)):
             raise ValueError("phi_curr must be an instance of Function")
         if(not callable(rho)):
@@ -99,8 +101,10 @@ class TwoPhaseFlows():
 
 
     """Weak formulation for pressure correction"""
-    def ICT_weak_form_2(self, p, q, dt, u_curr, rho, phi_curr, eps):
+    def ICT_weak_form_2(self, p, q, dt, p_old, u_curr, rho, phi_curr, eps):
         #Check the correctness of type
+        if(not isinstance(p_old, Function)):
+            raise ValueError("p_old must be an instance of Function")
         if(not isinstance(u_curr, Function)):
             raise ValueError("u_curr must be an instance of Function")
         if(not isinstance(phi_curr, Function)):
@@ -383,13 +387,13 @@ class TwoPhaseFlows():
             bc.apply(self.b2)
 
         #Solve the first system
-        solve(self.A2, u_curr.vector(), self.b2, "gmres", "default")
+        solve(self.A2, u_curr.vector(), self.b2, self.solver_ICT_1, self.precon_ICT_1)
 
         #Assemble and solve the second system
         assemble(self.a2_bis, tensor = self.A2_bis)
         assemble(self.L2_bis, tensor = self.b2_bis)
-        solve(self.A2_bis, p_curr.vector(), self.b2_bis, "gmres", "default")
+        solve(self.A2_bis, p_curr.vector(), self.b2_bis, self.solver_ICT_2, self.precon_ICT_2)
 
         #Assemble and solve the third system
         assemble(self.L2_tris, tensor = self.b2_tris)
-        solve(self.A2_tris, u_curr.vector(), self.b2_tris, "gmres", "default")
+        solve(self.A2_tris, u_curr.vector(), self.b2_tris, self.solver_ICT_3, self.precon_ICT_3)

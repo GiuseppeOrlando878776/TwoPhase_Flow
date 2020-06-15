@@ -73,13 +73,20 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #Set more adequate solvers in case of one core execution
         if(MPI.size(self.comm) == 1):
+            self.precon_Levset = "ilu"
+            if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+                self.solver_recon = "cg"
+                self.precon_recon = "icc"
+            else:
+                self.precon_recon = "ilu"
             if(self.NS_sol_method == 'Standard'):
                 self.solver_Standard_NS = "umfpack"
             elif(self.NS_sol_method == 'ICT'):
+                self.precon_ICT_1 = "ilu"
+                self.precon_ICT_2 = "ilu"
                 self.solver_ICT_3 = "cg"
                 self.precon_ICT_3 = "icc"
-            if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-                self.solver_recon = "cg"
+
 
         self.L0 = 1.0 #Reference length
         #Compute the Atwood number and the Reynolds number according to how the settings has been imposed
@@ -368,7 +375,7 @@ class RayleghTaylor(TwoPhaseFlows):
                 self.NS_weak_form()
             elif(self.NS_sol_method == 'ICT'):
                 self.ICT_weak_form_1()
-                self.ICT_weak_form_2(self.p, self.q, self.DT, self.u_curr, self.rho, self.phi_curr, self.eps)
+                self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
         except ValueError as e:
             if(self.rank == 0):
