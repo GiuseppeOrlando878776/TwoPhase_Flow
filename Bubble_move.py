@@ -77,8 +77,6 @@ class BubbleMove(TwoPhaseFlows):
             if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
                 self.solver_recon = "cg"
                 self.precon_recon = "icc"
-            else:
-                self.precon_recon = "ilu"
             if(self.NS_sol_method == 'Standard'):
                 self.solver_Standard_NS = "umfpack"
             elif(self.NS_sol_method == 'ICT'):
@@ -86,7 +84,7 @@ class BubbleMove(TwoPhaseFlows):
                 self.precon_ICT_2 = "ilu"
                 self.solver_ICT_3 = "cg"
                 self.precon_ICT_3 = "icc"
-
+        
         #Prepare useful variables for stabilization
         self.switcher_parameter = {self.stab_method: None}
         if(self.stab_method == 'IP'):
@@ -395,17 +393,18 @@ class BubbleMove(TwoPhaseFlows):
             end()
 
             #Solve Level-set reinit
-            try:
-                begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
-                self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
-                self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute updated normal vector
-                end()
-            except Exception as e:
-                if(self.rank == 0):
-                    print(str(e))
-                    print("Aborting simulation...")
-                exit(1)
+            if(self.n_iter % 1 == 0):
+                try:
+                    begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
+                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
+                    self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
+                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute updated normal vector
+                    end()
+                except Exception as e:
+                    if(self.rank == 0):
+                        print(str(e))
+                        print("Aborting simulation...")
+                    exit(1)
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")

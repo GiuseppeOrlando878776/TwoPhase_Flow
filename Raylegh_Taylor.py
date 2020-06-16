@@ -77,8 +77,6 @@ class RayleghTaylor(TwoPhaseFlows):
             if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
                 self.solver_recon = "cg"
                 self.precon_recon = "icc"
-            else:
-                self.precon_recon = "ilu"
             if(self.NS_sol_method == 'Standard'):
                 self.solver_Standard_NS = "umfpack"
             elif(self.NS_sol_method == 'ICT'):
@@ -86,7 +84,11 @@ class RayleghTaylor(TwoPhaseFlows):
                 self.precon_ICT_2 = "ilu"
                 self.solver_ICT_3 = "cg"
                 self.precon_ICT_3 = "icc"
-
+        else:
+            self.precon_Levset = "default"
+            self.precon_ICT_1 = "default"
+            self.precon_ICT_2 = "default"
+            self.precon_ICT_3 = "default"
 
         self.L0 = 1.0 #Reference length
         #Compute the Atwood number and the Reynolds number according to how the settings has been imposed
@@ -290,7 +292,7 @@ class RayleghTaylor(TwoPhaseFlows):
         #Define variational formulation for step 1
         F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr, self.eps)*self.u - self.rho(self.phi_old, self.eps)*self.u_old, self.v)*dx \
            + inner(self.rho(self.phi_curr, self.eps)*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
-           + (2.0/self.Re)*inner(self.mu(self.phi_curr, eps)*D(self.u), D(self.v))*dx \
+           + (2.0/self.Re)*inner(self.mu(self.phi_curr, self.eps)*D(self.u), D(self.v))*dx \
            - self.p_old*div(self.v)*dx \
            + (1.0/self.At)*inner(self.rho(self.phi_curr, self.eps)*self.e2, self.v)*dx
 

@@ -18,7 +18,7 @@ class TwoPhaseFlows():
         self.solver_Levset = "gmres"
         self.precon_Levset = "hypre_amg"
         self.solver_recon = "gmres"
-        self.precon_recon = "hypre_amg"
+        self.precon_recon = "default"
         self.solver_Standard_NS = "mumps"
         self.precon_Standard_NS = "default"
         self.solver_ICT_1 = "gmres"
