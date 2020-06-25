@@ -1,10 +1,11 @@
 from TwoPhaseFlows import *
 from My_Parameters import My_Parameters
+from Boundary_Definition import *
 
 from sys import exit
 import os
 
-class RayleghTaylor(TwoPhaseFlows):
+class RayleighTaylor(TwoPhaseFlows):
     """Class constructor"""
     def __init__(self, param_name):
         """
@@ -18,7 +19,7 @@ class RayleghTaylor(TwoPhaseFlows):
         """
 
         #Call the base class constructor
-        super(RayleghTaylor, self).__init__()
+        super(RayleighTaylor, self).__init__()
 
         #MPI settings
         self.comm = MPI.comm_world
@@ -29,7 +30,7 @@ class RayleghTaylor(TwoPhaseFlows):
 
         #Check coerence of dimensional choice
         assert self.Param["Reference_Dimensionalization"] == 'Non_Dimensional', \
-        "This instance of the problem 'RayleghTaylor' works in a non-dimensional framework"
+        "This instance of the problem 'RayleighTaylor' works in a non-dimensional framework"
 
         try:
             self.set_type = self.Param["Settings_Type"]
@@ -49,10 +50,9 @@ class RayleghTaylor(TwoPhaseFlows):
         #Check correctness of data read
         if(self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or \
            self.mu2 < DOLFIN_EPS or self.g < DOLFIN_EPS):
-            raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
+            raise ValueError("Invalid parameter in the configuration file (read a non positive value for some parameters)")
         if(self.dt > self.t_end):
             raise ValueError("Time-step greater than final time")
-
 
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
@@ -63,32 +63,27 @@ class RayleghTaylor(TwoPhaseFlows):
         self.NS_sol_method = self.Param["NS_Procedure"]
 
         #Check correctness of Level-set method
-        assert self.stab_method in self.stab_dict, "Stabilization method not available"
+        if(self.stab_method not in self.stab_dict):
+            raise ValueError("Stabilization method not available")
 
         #Check correctness of Navier-Stokes method
-        assert self.NS_sol_method in self.NS_sol_dict, "Solution method for Navier-Stokes not available"
+        if(self.NS_sol_method not in self.NS_sol_dict):
+            raise ValueError("Solution method for Navier-Stokes not available")
 
         #Check correctness of reinitialization method
-        assert self.reinit_method in self.reinit_method_dict, "Reinitialization method not available"
+        if(self.reinit_method not in self.reinit_method_dict):
+            raise ValueError("Reinitialization method not available")
 
         #Set more adequate solvers in case of one core execution
         if(MPI.size(self.comm) == 1):
-            self.precon_Levset = "ilu"
             if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
                 self.solver_recon = "cg"
                 self.precon_recon = "icc"
             if(self.NS_sol_method == 'Standard'):
                 self.solver_Standard_NS = "umfpack"
             elif(self.NS_sol_method == 'ICT'):
-                self.precon_ICT_1 = "ilu"
-                self.precon_ICT_2 = "ilu"
                 self.solver_ICT_3 = "cg"
                 self.precon_ICT_3 = "icc"
-        else:
-            self.precon_Levset = "default"
-            self.precon_ICT_1 = "default"
-            self.precon_ICT_2 = "default"
-            self.precon_ICT_3 = "default"
 
         self.L0 = 1.0 #Reference length
         #Compute the Atwood number and the Reynolds number according to how the settings has been imposed
@@ -165,8 +160,10 @@ class RayleghTaylor(TwoPhaseFlows):
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
 
         #Define FE spaces
+        if(self.deg == 0):
+            raise ValueError("Invalid degree for polynomials employed in Navier-Stokes (the pair P1-P0 is not stable)")
         Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
-        Pelem = FiniteElement("Lagrange" if self.deg > 0 else "DG", self.mesh.ufl_cell(), self.deg)
+        Pelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
         self.V  = FunctionSpace(self.mesh, Velem)
         self.P  = FunctionSpace(self.mesh, Pelem)
         if(self.NS_sol_method == 'Standard'):
@@ -214,13 +211,13 @@ class RayleghTaylor(TwoPhaseFlows):
             hmin = MPI.min(self.comm, self.mesh.hmin())
             self.eps = self.Param["Interface_Thickness"]
             if(self.eps < DOLFIN_EPS):
-                raise  ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
+                raise ValueError("Negative value for the interface thickness")
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
             self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
                                                                     #and so a very small step is needed
 
-            #Prepare useful dictionary in order to avoid too many ifs
+            #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
             self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form}
             self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
@@ -238,7 +235,7 @@ class RayleghTaylor(TwoPhaseFlows):
                 raise  ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
             self.beta_reinit = Constant(self.Param["Penalization_Reconstruction"])
 
-            #Prepare useful dictionary in order to avoid too many ifs
+            #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
             self.switcher_reinit_varf = {'Non_Conservative_Elliptic': self.NCLSM_elliptic_weak_form}
             self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
@@ -252,11 +249,10 @@ class RayleghTaylor(TwoPhaseFlows):
                                                      self.max_subiters, self.tol_recon)}
         elif(self.reinit_method == 'Conservative'):
             hmin = MPI.min(self.comm, self.mesh.hmin())
-            d = self.Param["Extra_Power_Conservative_LevSet"]
-            self.dt_reinit = Constant(0.5*hmin**(1.0 + d))
-            self.eps = Constant(0.5*hmin**(1.0 - d))
+            self.dt_reinit = Constant(0.5*hmin**(1.1))
+            self.eps = Constant(0.5*hmin**(0.9))
 
-            #Prepare useful dictionary in order to avoid too many ifs
+            #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
             self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
             self.switcher_arguments_reinit_varf = {'Conservative': \
@@ -269,69 +265,48 @@ class RayleghTaylor(TwoPhaseFlows):
                                                      self.max_subiters, self.tol_recon)}
 
 
-    """Weak formulation for Navier-Stokes"""
-    def NS_weak_form(self):
-        #Set weak formulation
-        F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr, self.eps)*self.u - self.rho(self.phi_old, self.eps)*self.u_old, self.v)*dx \
-           + inner(self.rho(self.phi_curr, self.eps)*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
-           + (2.0/self.Re)*inner(self.mu(self.phi_curr, self.eps)*D(self.u), D(self.v))*dx \
-           - self.p*div(self.v)*dx \
-           + div(self.u)*self.q*dx \
-           + (1.0/self.At)*inner(self.rho(self.phi_curr, self.eps)*self.e2, self.v)*dx
-
-        #Save corresponding weak form and declare suitable matrix and vector
-        self.a2 = lhs(F2)
-        self.L2 = rhs(F2)
-
-        self.A2 = PETScMatrix()
-        self.b2 = PETScVector()
-
-
-    """Weak formulation for tentative velocity"""
-    def ICT_weak_form_1(self):
-        #Define variational formulation for step 1
-        F2 = (1.0/self.DT)*inner(self.rho(self.phi_curr, self.eps)*self.u - self.rho(self.phi_old, self.eps)*self.u_old, self.v)*dx \
-           + inner(self.rho(self.phi_curr, self.eps)*dot(self.u_old, nabla_grad(self.u)), self.v)*dx \
-           + (2.0/self.Re)*inner(self.mu(self.phi_curr, self.eps)*D(self.u), D(self.v))*dx \
-           - self.p_old*div(self.v)*dx \
-           + (1.0/self.At)*inner(self.rho(self.phi_curr, self.eps)*self.e2, self.v)*dx
-
-        #Save corresponding weak form and declare suitable matrix and vector
-        self.a2 = lhs(F2)
-        self.L2 = rhs(F2)
-
-        self.A2 = PETScMatrix()
-        self.b2 = PETScVector()
-
-
     """Set the proper initial condition"""
     def set_initial_condition(self):
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)), self.V))
         self.p_old.assign(interpolate(Constant(0.0), self.P))
+
+        #Check type of initial perturbation
+        Interface_Perturbation_RT = self.Param["Interface_Perturbation_RT"]
+        if(Interface_Perturbation_RT not in {'Cos', 'Tanh'}):
+            raise ValueError("Invalid parameter for initial perturbation for RT instability")
+
+        #Assign proper initial condition according to perturbation choice
         if(self.reinit_method == 'Non_Conservative_Elliptic' or self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            f = Expression("tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))", A = self.height/2.0, degree = 8)
+            if(Interface_Perturbation_RT == 'Tanh'):
+                f = Expression("tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))", A = self.height/2.0, degree = 8)
+            else:
+                f = Expression("x[1] - A - 0.01*B*cos(2*pi*x[0])", A = self.height/2.0, B = self.height, degree = 8)
             self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
-            f = Expression("1.0/(1.0 + exp(-tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))/eps))", \
-                            A = self.height/2.0,eps = self.eps, degree = 8)
+            if(Interface_Perturbation_RT == 'Tanh'):
+                f = Expression("1.0/(1.0 + exp(-tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))/eps))", \
+                                A = self.height/2.0, eps = self.eps, degree = 8)
+            else:
+                f = Expression("1.0/(1.0 + exp(-(x[1] - A - 0.01*B*cos(2*pi*x[0]))/eps))", \
+                                A = self.height/2.0, B = self.height, eps = self.eps, degree = 8)
             self.phi_old.assign(interpolate(f, self.Q))
 
 
     """Assemble boundary condition"""
     def assembleBC(self):
         if(self.NS_sol_method == 'Standard'):
-            self.bcs = [DirichletBC(self.W.sub(0), Constant((0.0,0.0)),  'near(x[1], 0.0) || near(x[1], 4.0)'), \
-                        DirichletBC(self.W.sub(0).sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
+            self.bcs = [DirichletBC(self.W.sub(0), Constant((0.0,0.0)),  NoSlip_Boundary(self.height)), \
+                        DirichletBC(self.W.sub(0).sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
 
-            #Useful dictionaries in order to avoid too many ifs
+            #Useful dictionary for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'Standard': self.solve_Standard_NS_system}
             self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr)}
         elif(self.NS_sol_method == 'ICT'):
-            self.bcs = [DirichletBC(self.V, Constant((0.0,0.0)),  'near(x[1], 0.0) || near(x[1], 4.0)'), \
-                        DirichletBC(self.V.sub(0), Constant(0.0), 'near(x[0], 0.0) || near(x[0], 1.0)')]
+            self.bcs = [DirichletBC(self.V, Constant((0.0,0.0)),  NoSlip_Boundary(self.height)), \
+                        DirichletBC(self.V.sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
 
-            #Useful dictionaries in order to avoid too many ifs
+            #Useful dictionary for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'ICT': self.solve_ICT_NS_systems}
             self.switcher_arguments_NS_solve = {'ICT': (self.bcs, self.u_curr, self.p_curr)}
 
@@ -374,9 +349,11 @@ class RayleghTaylor(TwoPhaseFlows):
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
-                self.NS_weak_form()
+                self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                                  self.phi_curr, self.phi_old, self.eps, Re = self.Re, Fr = np.sqrt(self.At), We = 0.0)
             elif(self.NS_sol_method == 'ICT'):
-                self.ICT_weak_form_1()
+                self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
+                                     self.phi_curr, self.phi_old, self.eps, Re = self.Re, Fr = np.sqrt(self.At), We = 0.0)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
         except ValueError as e:
@@ -408,12 +385,13 @@ class RayleghTaylor(TwoPhaseFlows):
         #Set weak formulations
         self.set_weak_forms()
 
-        #Time-stepping loop
+        #Time-stepping loop parameters
         self.t = 0.0
         self.n_iter = 0
+        reinit_iters = self.Param["Reinitialization_Frequency"]
+        save_iters = self.Param["Saving_Frequency"]
 
         #File for plotting
-        save_iters = self.Param["Saving_Frequency"]
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
 
@@ -430,17 +408,18 @@ class RayleghTaylor(TwoPhaseFlows):
             end()
 
             #Solve Level-set reinit
-            try:
-                begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                if(self.reinit_method == 'Conservative'):
-                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2))
-                self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
-                end()
-            except Exception as e:
-                if(self.rank == 0):
-                    print(str(e))
-                    print("Aborting simulation...")
-                exit(1)
+            if(self.n_iter % reinit_iters == 0):
+                try:
+                    begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
+                    if(self.reinit_method == 'Conservative'):
+                        self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2))
+                    self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
+                    end()
+                except Exception as e:
+                    if(self.rank == 0):
+                        print(str(e))
+                        print("Aborting simulation...")
+                    exit(1)
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
@@ -463,3 +442,6 @@ class RayleghTaylor(TwoPhaseFlows):
             end()
 
             self.t += self.dt if self.t + self.dt <= self.t_stop or abs(self.t - self.t_stop) < DOLFIN_EPS else self.t_stop
+
+        #Save the final state
+        self.plot_and_save()

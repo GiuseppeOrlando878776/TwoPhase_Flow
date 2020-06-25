@@ -1,6 +1,6 @@
 from sys import argv
 from Bubble_move import *
-from Raylegh_Taylor import *
+from Rayleigh_Taylor import *
 
 def main():
     if(len(argv) >= 2):
@@ -15,7 +15,7 @@ def main():
     except RuntimeError as e:
         print(str(e) +  "\nPlease check configuration file")
 
-    sim = RayleghTaylor("test_RT.cfg")
+    sim = RayleighTaylor("test_RT.cfg")
     sim.run()
 
 
