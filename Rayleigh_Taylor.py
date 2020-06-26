@@ -28,7 +28,7 @@ class RayleighTaylor(TwoPhaseFlows):
         #Start with the specific problem settings
         self.Param = param_handler
 
-        #Check coerence of dimensional choice
+        #Check coherence of dimensional choice
         if(self.Param["Reference_Dimensionalization"] != 'Non_Dimensional'):
             raise ValueError("This instance of the problem 'RayleighTaylor' works in a non-dimensional framework")
 
@@ -234,24 +234,6 @@ class RayleighTaylor(TwoPhaseFlows):
             self.switcher_arguments_reinit_solve = {'Non_Conservative_Hyperbolic': \
                                                     (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
                                                      self.max_subiters, self.tol_recon)}
-        elif(self.reinit_method == 'Non_Conservative_Elliptic'):
-            self.eps = self.Param["Interface_Thickness"]
-            if(self.eps < DOLFIN_EPS):
-                raise  ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
-            self.beta_reinit = Constant(self.Param["Penalization_Reconstruction"])
-
-            #Prepare useful dictionary in order to avoid too many ifs:
-            #Dictionary for reinitialization weak form
-            self.switcher_reinit_varf = {'Non_Conservative_Elliptic': self.NCLSM_elliptic_weak_form}
-            self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
-                                                   (self.phi, self.l, self.phi0, self.phi_curr, self.Appr_Delta, \
-                                                    self.eps, self.beta_reinit)}
-
-            #Dictionary for reinitialization solution
-            self.switcher_reinit_solve = {'Non_Conservative_Elliptic': self.NC_Levelset_elliptic_reinit}
-            self.switcher_arguments_reinit_solve = {'Non_Conservative_Elliptic': \
-                                                    (self.phi_curr, self.phi_intermediate, self.phi0, \
-                                                     self.max_subiters, self.tol_recon)}
         elif(self.reinit_method == 'Conservative'):
             hmin = MPI.min(self.comm, self.mesh.hmin())
             self.dt_reinit = Constant(0.5*hmin**(1.1))
@@ -282,7 +264,7 @@ class RayleighTaylor(TwoPhaseFlows):
             raise ValueError("Invalid parameter for initial perturbation for RT instability")
 
         #Assign proper initial condition according to perturbation choice
-        if(self.reinit_method == 'Non_Conservative_Elliptic' or self.reinit_method == 'Non_Conservative_Hyperbolic'):
+        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             if(Interface_Perturbation_RT == 'Tanh'):
                 f = Expression("tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))", A = self.height/2.0, degree = 8)
             else:
@@ -318,7 +300,7 @@ class RayleighTaylor(TwoPhaseFlows):
 
     """Auxiliary function to select proper Heavised approximation"""
     def Appr_Heaviside(self, x, eps):
-        if(self.reinit_method == 'Non_Conservative_Hyperbolic' or self.reinit_method == 'Non_Conservative_Elliptic'):
+        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             return CHeaviside(x, eps)
         elif(self.reinit_method == 'Conservative'):
             return x
@@ -326,7 +308,7 @@ class RayleighTaylor(TwoPhaseFlows):
 
     """Auxiliary function to select proper Dirac's delta approximation"""
     def Appr_Delta(self, x, eps):
-        if(self.reinit_method == 'Non_Conservative_Hyperbolic' or self.reinit_method == 'Non_Conservative_Elliptic'):
+        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             return CDelta(x, eps)
         elif(self.reinit_method == 'Conservative'):
             return 1.0

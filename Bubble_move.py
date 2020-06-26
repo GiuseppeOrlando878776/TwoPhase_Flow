@@ -29,7 +29,7 @@ class BubbleMove(TwoPhaseFlows):
         self.comm = MPI.comm_world
         self.rank = MPI.rank(self.comm)
 
-        #Check coerence of dimensional choice
+        #Check coherence of dimensional choice
         if(self.Param["Reference_Dimensionalization"] != 'Dimensional'):
             raise ValueError("This instance of the problem 'BubbleMove' works in a dimensional framework")
 
@@ -201,24 +201,6 @@ class BubbleMove(TwoPhaseFlows):
             self.switcher_arguments_reinit_solve = {'Non_Conservative_Hyperbolic': \
                                                     (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
                                                      self.max_subiters, self.tol_recon)}
-        elif(self.reinit_method == 'Non_Conservative_Elliptic'):
-            self.eps = self.Param["Interface_Thickness"]
-            if(self.eps < DOLFIN_EPS):
-                raise  ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
-            self.beta_reinit = Constant(self.Param["Penalization_Reconstruction"])
-
-            #Prepare useful dictionary in order to avoid too many ifs:
-            #Dictionary for reinitialization weak form
-            self.switcher_reinit_varf = {'Non_Conservative_Elliptic': self.NCLSM_elliptic_weak_form}
-            self.switcher_arguments_reinit_varf = {'Non_Conservative_Elliptic': \
-                                                   (self.phi, self.l, self.phi0, self.phi_curr, self.Appr_Delta, \
-                                                    self.eps, self.beta_reinit)}
-
-            #Dictionary for reinitialization solution
-            self.switcher_reinit_solve = {'Non_Conservative_Elliptic': self.NC_Levelset_elliptic_reinit}
-            self.switcher_arguments_reinit_solve = {'Non_Conservative_Elliptic': \
-                                                    (self.phi_curr, self.phi_intermediate, self.phi0, \
-                                                     self.max_subiters, self.tol_recon)}
         elif(self.reinit_method == 'Conservative'):
             hmin = MPI.min(self.comm, self.mesh.hmin())
             self.dt_reinit = Constant(0.5*hmin**(1.1))
@@ -255,7 +237,7 @@ class BubbleMove(TwoPhaseFlows):
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)), self.V))
         self.p_old.assign(interpolate(Constant(0.0), self.P))
-        if(self.reinit_method == 'Non_Conservative_Elliptic' or self.reinit_method == 'Non_Conservative_Hyperbolic'):
+        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                             A = center[0], B = center[1], r = radius, degree = 2)
             self.phi_old.assign(interpolate(f,self.Q))
@@ -285,7 +267,7 @@ class BubbleMove(TwoPhaseFlows):
 
     """Auxiliary function to select proper Heavised approximation"""
     def Appr_Heaviside(self, x, eps):
-        if(self.reinit_method == 'Non_Conservative_Hyperbolic' or self.reinit_method == 'Non_Conservative_Elliptic'):
+        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             return CHeaviside(x, eps)
         elif(self.reinit_method == 'Conservative'):
             return x
@@ -293,7 +275,7 @@ class BubbleMove(TwoPhaseFlows):
 
     """Auxiliary function to select proper Dirac's delta approximation"""
     def Appr_Delta(self, x, eps):
-        if(self.reinit_method == 'Non_Conservative_Hyperbolic' or self.reinit_method == 'Non_Conservative_Elliptic'):
+        if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             return CDelta(x, eps)
         elif(self.reinit_method == 'Conservative'):
             return 1.0
@@ -354,7 +336,7 @@ class BubbleMove(TwoPhaseFlows):
             Uc = assemble(inner(self.u_old,self.e1)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
             Vc = assemble(inner(self.u_old,self.e2)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
             timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
-        elif(self.reinit_method == 'Non_Conservative_Hyperbolic' or self.reinit_method == 'Non_Conservative_Elliptic'):
+        elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             Vol = assemble(conditional(lt(self.phi_old, 0.0), 1.0, 0.0)*dx)
             Pa = 2.0*sqrt(np.pi*Vol)
             Pb = assemble(mgrad(self.phi_old)*self.Appr_Delta(self.phi_old,self.eps)*dx)

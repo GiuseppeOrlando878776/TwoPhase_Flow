@@ -9,7 +9,7 @@ class TwoPhaseFlows():
         #solution method for Navier-Stokes and reinitialization
         self.stab_dict = {'IP', 'SUPG', 'None'}
         self.NS_sol_dict = {'Standard', 'ICT'}
-        self.reinit_method_dict = {'Non_Conservative_Hyperbolic', 'Non_Conservative_Elliptic', 'Conservative'}
+        self.reinit_method_dict = {'Non_Conservative_Hyperbolic', 'Conservative'}
 
         #Save solvers and preconditioners settings; in this way we prepare ourselves
         #in case the option to pass it through configuration file will be added in a future version
@@ -281,26 +281,6 @@ class TwoPhaseFlows():
         self.b1_reinit = PETScVector()
 
 
-    """Weak form non-conservative reinitialization (elliptic version)"""
-    def NCLSM_elliptic_weak_form(self, phi, l, phi0, phi_curr, CDelta, eps_reinit, beta_reinit = 1.0e3):
-        #Check correctness of types
-        if(not isinstance(phi0, Function)):
-            raise ValueError("phi0 must be an instance of Function")
-        if(not isinstance(phi_curr, Function)):
-            raise ValueError("phi_curr must be an instance of Function")
-        if(not callable(CDelta)):
-            raise ValueError("CDelta must be a callable object")
-
-        #Declare weak formulation
-        self.a1_reinit = inner(grad(phi), grad(l))*dx \
-                       + beta_reinit*phi*CDelta(phi_curr, eps_reinit)*l*dx
-        self.L1_reinit = inner(grad(phi0)/mgrad(phi0), grad(l))*dx
-
-        #Declare matrix and vector for solution
-        self.A1_reinit = PETScMatrix()
-        self.b1_reinit = PETScVector()
-
-
     """Weak form conservative reinitialization"""
     def CLSM_weak_form(self, phi_intermediate, l, phi0, n_gamma, dt_reinit, eps_reinit):
         #Check correctness of types
@@ -341,37 +321,6 @@ class TwoPhaseFlows():
 
             #Compute the L2-error and check no divergence
             error = (((phi_intermediate - phi0)/dt_reinit)**2)*dx
-            E = sqrt(assemble(error))
-
-            if(E_old < E):
-                raise RuntimeError("Divergence at the reinitialization level (iteration " + str(n + 1) + ")")
-            elif(E < tol):
-                break
-
-            #Set previous step solution
-            phi0.assign(phi_intermediate)
-
-        #Assign the reinitialized level-set to the current solution
-        phi_curr.assign(phi_intermediate)
-
-
-    """Build and solve the system for Level set elliptic reinitialization (non-conservative)"""
-    def NC_Levelset_elliptic_reinit(self, phi_curr, phi_intermediate, phi0, n_subiters = 10, tol = 1.0e-4):
-        #Assign current solution
-        phi0.assign(phi_curr)
-
-        #Build the matrix that will not change during the procedure
-        assemble(self.a1_reinit, tensor = self.A1_reinit)
-
-        #Start the loop
-        E_old = 1e10
-        for n in range(n_subiters):
-            #Assemble and solve the system
-            assemble(self.L1_reinit, tensor = self.b1_reinit)
-            solve(self.A1_reinit, phi_intermediate.vector(), self.b1_reinit, self.solver_recon , self.precon_recon)
-
-            #Compute the error and check no divergence
-            error = ((phi_intermediate - phi0)**2)*dx
             E = sqrt(assemble(error))
 
             if(E_old < E):
