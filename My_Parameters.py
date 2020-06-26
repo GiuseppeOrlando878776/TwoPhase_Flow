@@ -32,6 +32,7 @@ class My_Parameters:
         self.Param.add("Reinitialization_Frequency", 1)
         self.Param.add("Saving_Directory", 'Sim')
         self.Param.add("Interface_Perturbation_RT", 'Cos')
+        self.Param.add("Problem", 'Bubble')
 
         try:
             self.file = open(param_name, "r")

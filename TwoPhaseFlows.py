@@ -395,7 +395,7 @@ class TwoPhaseFlows():
         for n in range(n_subiters):
             #Solve the system
             solve(self.F1_reinit == 0, phi_intermediate, \
-                  solver_parameters={"newton_solver": {'linear_solver': self.solver_recon, "preconditioner": self.precon_recon,,\
+                  solver_parameters={"newton_solver": {"linear_solver": self.solver_recon, "preconditioner": self.precon_recon,\
                                      "maximum_iterations": 20, "absolute_tolerance": 1e-8, "relative_tolerance": 1e-6}}, \
                   form_compiler_parameters={"optimize": True})
 

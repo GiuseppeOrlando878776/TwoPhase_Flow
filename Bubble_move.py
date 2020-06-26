@@ -7,7 +7,7 @@ import os
 
 class BubbleMove(TwoPhaseFlows):
     """Class constructor"""
-    def __init__(self, param_name):
+    def __init__(self, param_handler):
         """
         Param --- class Parameters to store desired configuration
         rho1  --- Lighter density
@@ -23,15 +23,15 @@ class BubbleMove(TwoPhaseFlows):
         super(BubbleMove, self).__init__()
 
         #Start with the specific problem settings
-        self.Param = My_Parameters(param_name).get_param()
+        self.Param = param_handler
 
         #MPI settings
         self.comm = MPI.comm_world
         self.rank = MPI.rank(self.comm)
 
         #Check coerence of dimensional choice
-        assert self.Param["Reference_Dimensionalization"] == 'Dimensional', \
-        "This instance of the problem 'BubbleMove' works in a dimensional framework"
+        if(self.Param["Reference_Dimensionalization"] != 'Dimensional'):
+            raise ValueError("This instance of the problem 'BubbleMove' works in a dimensional framework")
 
         try:
             self.rho1  = float(self.Param["Lighter_density"])
@@ -114,6 +114,11 @@ class BubbleMove(TwoPhaseFlows):
         #Detect properties for reconstrution step
         self.tol_recon = self.Param["Tolerance_recon"]
         self.max_subiters = self.Param["Maximum_subiters_recon"]
+
+
+    """Return the communicator"""
+    def get_communicator(self):
+        return self.comm
 
 
     """Build the mesh for the simulation"""
