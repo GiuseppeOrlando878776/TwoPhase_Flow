@@ -211,7 +211,7 @@ class RayleighTaylor(TwoPhaseFlows):
             hmin = MPI.min(self.comm, self.mesh.hmin())
             self.eps = self.Param["Interface_Thickness"]
             if(self.eps < DOLFIN_EPS):
-                raise ValueError("Negative value for the interface thickness")
+                raise ValueError("Non-Positive value for the interface thickness")
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
             self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
@@ -363,7 +363,7 @@ class RayleighTaylor(TwoPhaseFlows):
             exit(1)
 
 
-    """Plot the level-set function and compute the volume"""
+    """Save the actual state for post-processing"""
     def plot_and_save(self):
         #Save the actual state for visualization
         self.vtkfile_u << (self.u_old, self.t*self.t0)
@@ -444,4 +444,5 @@ class RayleighTaylor(TwoPhaseFlows):
             self.t += self.dt if self.t + self.dt <= self.t_stop or abs(self.t - self.t_stop) < DOLFIN_EPS else self.t_stop
 
         #Save the final state
-        self.plot_and_save()
+        if(self.n_iter % self.save_iters != 0):
+            self.plot_and_save()
