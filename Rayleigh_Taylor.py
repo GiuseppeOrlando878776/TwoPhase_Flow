@@ -5,55 +5,54 @@ from Boundary_Definition import *
 from sys import exit
 import os
 
-class BubbleMove(TwoPhaseFlows):
+class RayleighTaylor(TwoPhaseFlows):
     """Class constructor"""
     def __init__(self, param_handler):
         """
         Param --- class Parameters to store desired configuration
-        rho1  --- Lighter density
-        rho2  --- Heavier density
-        mu1   --- Viscosity lighter fluid
-        mu2   --- Viscosity heavier fluid
+        mu1   --- Viscosity_lighter_fluid
+        mu2   --- Viscosity_heavier_fluid
+        g     --- Gravity force
         dt    --- Specified time step
         t_end --- End time of the simulation
         deg   --- Polynomial degree
         """
 
         #Call the base class constructor
-        super(BubbleMove, self).__init__()
-
-        #Start with the specific problem settings
-        self.Param = param_handler
+        super(RayleighTaylor, self).__init__()
 
         #MPI settings
         self.comm = MPI.comm_world
         self.rank = MPI.rank(self.comm)
 
+        #Start with the specific problem settings
+        self.Param = param_handler
+
         #Check coherence of dimensional choice
-        if(self.Param["Reference_Dimensionalization"] != 'Dimensional'):
-            raise ValueError("This instance of the problem 'BubbleMove' works in a dimensional framework")
+        if(self.Param["Reference_Dimensionalization"] != 'Non_Dimensional'):
+            raise ValueError("This instance of the problem 'RayleighTaylor' works in a non-dimensional framework")
 
         try:
-            self.rho1  = float(self.Param["Lighter_density"])
-            self.rho2  = float(self.Param["Heavier_density"])
-            self.mu1   = float(self.Param["Viscosity_lighter_fluid"])
-            self.mu2   = float(self.Param["Viscosity_heavier_fluid"])
-            self.g     = float(self.Param["Gravity"])
-            self.sigma = float(self.Param["Surface_tension"])
-            self.dt    = float(self.Param["Time_step"])
-            self.t_end = float(self.Param["End_time"])
+            self.set_type = self.Param["Settings_Type"]
+            self.mu1      = float(self.Param["Viscosity_lighter_fluid"])
+            self.mu2      = float(self.Param["Viscosity_heavier_fluid"])
+            self.g        = float(self.Param["Gravity"])
+            self.dt       = float(self.Param["Time_step"])
+            self.t_end    = float(self.Param["End_time"])
         except RuntimeError as e:
-            print(str(e) +  "\nPlease check configuration file")
+            if(self.rank == 0):
+                print(str(e) +  "\nPlease check configuration file")
             exit(1)
 
+        if(self.set_type not in {'Physical', 'Parameters'}):
+            raise ValueError("Unknown value for settings values")
+
         #Check correctness of data read
-        if(self.rho1 < DOLFIN_EPS or self.rho2 < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or self.mu2 < DOLFIN_EPS \
-           or self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.g < DOLFIN_EPS or self.sigma < DOLFIN_EPS):
-            raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
+        if(self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or \
+           self.mu2 < DOLFIN_EPS or self.g < DOLFIN_EPS):
+            raise ValueError("Invalid parameter in the configuration file (read a non positive value for some parameters)")
         if(self.dt > self.t_end):
             raise ValueError("Time-step greater than final time")
-        if(self.rho2 < self.rho1 and self.rank == 0):
-            warnings.warn("The heavier density is not greater than the lighter one")
 
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
@@ -86,6 +85,46 @@ class BubbleMove(TwoPhaseFlows):
                 self.solver_ICT_3 = "cg"
                 self.precon_ICT_3 = "icc"
 
+        self.L0 = 1.0 #Reference length
+        #Compute the Atwood number and the Reynolds number according to how the settings has been imposed
+        if(self.set_type == 'Physical'):
+            try:
+                self.rho1 = float(self.Param["Lighter_density"])
+                self.rho2 = float(self.Param["Heavier_density"])
+                self.At = (self.rho2 - self.rho1)/(self.rho2 + self.rho1)
+                if(self.rho2 < self.rho1 and self.rank == 0):
+                    warnings.warn("The heavier density is not greater than the lighter one")
+                self.Re = self.rho1*self.L0*np.sqrt(self.At*self.L0*self.g)/self.mu1
+                assert self.Re > 1.0, "Invalid Reynolds number computed"
+            except RuntimeError as e:
+                if(self.rank == 0):
+                    print(str(e) +  "\nPlease check configuration file")
+                exit(1)
+        elif(self.set_type == 'Parameters'):
+            try:
+                self.At = float(self.Param["Atwood_number"])
+                if(self.At < 0.0 or self.At > 1.0):
+                    raise ValueError("Invalid Atwood number")
+                self.Re = float(self.Param["Reynolds_number"])
+                if(self.Re < 1.0):
+                    raise ValueError("Invalid Reynolds number")
+                self.rho1 = self.Re*self.mu1/(self.L0*np.sqrt(self.At*self.L0*self.g))
+                self.rho2 = self.rho1*(1.0 + self.At)/(1.0 - self.At)
+            except RuntimeError as e:
+                if(self.rank == 0):
+                    print(str(e) +  "\nPlease check configuration file")
+                exit(1)
+
+        #Compute density and viscosity ratio
+        self.rho2_rho1 = self.rho2/self.rho1
+        self.mu2_mu1   = self.mu2/self.mu1
+
+        #Compute reference time: we assume that self.dt is the one that the user wants to use in the weak
+        #form (the step) while self.t_end is the dimensional final time
+        self.U0 = np.sqrt(self.L0*self.At*self.g)
+        self.t0 = self.L0/self.U0
+        self.t_stop = self.t_end/self.t0
+
         #Prepare useful variables for stabilization
         self.switcher_parameter = {self.stab_method: None}
         if(self.stab_method == 'IP'):
@@ -93,22 +132,13 @@ class BubbleMove(TwoPhaseFlows):
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['IP'] = self.alpha
         elif(self.stab_method == 'SUPG'):
-            try:
-                self.Re = float(self.Param["Reynolds_number"])
-                if(self.Re < 1.0):
-                    raise ValueError("Invalid Reynolds number specified")
-                self.L0 = (self.mu2*self.Re/(self.rho2*np.sqrt(self.g)))**(2/3)
-            except RuntimeError as e:
-                #In case Reynolds number is not present, compute it automatically
-                self.L0 = 1.0
-                self.Re = self.rho2*self.L0*np.sqrt(self.L0*0.98)/self.mu2
-                assert self.Re > 1.0, "Invalid Reynolds number computed"
+            #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['SUPG'] = self.Re
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
 
-        #Set parameter for standard output
+        #Set parameter for standard output (only rank 0 will print)
         set_log_level(self.Param["Log_Level"] if self.rank == 0 else 1000)
 
         #Detect properties for reconstrution step
@@ -128,7 +158,8 @@ class BubbleMove(TwoPhaseFlows):
             self.base   = float(self.Param["Base"])
             self.height = float(self.Param["Height"])
         except RuntimeError as e:
-            print(str(e) +  "\nPlease check configuration file")
+            if(self.rank == 0):
+                print(str(e) +  "\nPlease check configuration file")
             exit(1)
         self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.base, self.height), \
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
@@ -143,7 +174,6 @@ class BubbleMove(TwoPhaseFlows):
         if(self.NS_sol_method == 'Standard'):
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
-        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         if(self.NS_sol_method == 'Standard'):
@@ -167,23 +197,26 @@ class BubbleMove(TwoPhaseFlows):
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
 
-        #Define function to store the normal
-        self.n = Function(self.Q2)
-
         #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
         self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
                                                  #reinitialization and it is also useful for clearness
 
-        #Define function and vector for plotting level-set and computing volume
+        #Define function and vector for saving purposes
         self.rho_interp = Function(self.Q)
+
+        #Declare function for normal vector (in case of conservative level-set method)
+        if(self.reinit_method == 'Conservative'):
+            self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+            self.n = Function(self.Q2)
+
 
         #Parameters for reinitialization steps
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             hmin = MPI.min(self.comm, self.mesh.hmin())
             self.eps = self.Param["Interface_Thickness"]
             if(self.eps < DOLFIN_EPS):
-                raise  ValueError("Non-Positive value for the interface thickness")
+                raise ValueError("Non-Positive value for the interface thickness")
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
             self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
@@ -219,31 +252,31 @@ class BubbleMove(TwoPhaseFlows):
                                                      self.max_subiters, self.tol_recon)}
 
 
-    """"Set the proper initial condition"""
+    """Set the proper initial condition"""
     def set_initial_condition(self):
-        #Read from configuration file center and radius
-        try:
-            center = Point(float(self.Param["x_center"]), float(self.Param["y_center"]))
-            radius = float(self.Param["Radius"])
-        except RuntimeError as e:
-            print(str(e) +  "\nPlease check configuration file")
-            exit(1)
-
-        #Check geoemtric limits
-        if(center[0] - radius < 0.0 or center[0] + radius > self.base or \
-           center[1] - radius < 0.0 or center[1] + radius > self.height):
-           raise ValueError("Initial condition of interface goes outside the domain")
-
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)), self.V))
         self.p_old.assign(interpolate(Constant(0.0), self.P))
+
+        #Check type of initial perturbation
+        Interface_Perturbation_RT = self.Param["Interface_Perturbation_RT"]
+        if(Interface_Perturbation_RT not in {'Cos', 'Tanh'}):
+            raise ValueError("Invalid parameter for initial perturbation for RT instability")
+
+        #Assign proper initial condition according to perturbation choice
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
-                            A = center[0], B = center[1], r = radius, degree = 2)
+            if(Interface_Perturbation_RT == 'Tanh'):
+                f = Expression("tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))", A = self.height/2.0, degree = 8)
+            else:
+                f = Expression("x[1] - A - 0.01*B*cos(2*pi*x[0])", A = self.height/2.0, B = self.height, degree = 8)
             self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
-            f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
-                            A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
+            if(Interface_Perturbation_RT == 'Tanh'):
+                f = Expression("1.0/(1.0 + exp(-tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))/eps))", \
+                                A = self.height/2.0, eps = self.eps, degree = 8)
+            else:
+                f = Expression("1.0/(1.0 + exp(-(x[1] - A - 0.01*B*cos(2*pi*x[0]))/eps))", \
+                                A = self.height/2.0, B = self.height, eps = self.eps, degree = 8)
             self.phi_old.assign(interpolate(f, self.Q))
 
 
@@ -253,14 +286,14 @@ class BubbleMove(TwoPhaseFlows):
             self.bcs = [DirichletBC(self.W.sub(0), Constant((0.0,0.0)),  NoSlip_Boundary(self.height)), \
                         DirichletBC(self.W.sub(0).sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
 
-            #Useful dictionaries for solver in order to avoid too many ifs
+            #Useful dictionary for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'Standard': self.solve_Standard_NS_system}
             self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr)}
         elif(self.NS_sol_method == 'ICT'):
             self.bcs = [DirichletBC(self.V, Constant((0.0,0.0)),  NoSlip_Boundary(self.height)), \
                         DirichletBC(self.V.sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
 
-            #Useful dictionaries for solver in order to avoid too many ifs
+            #Useful dictionary for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'ICT': self.solve_ICT_NS_systems}
             self.switcher_arguments_NS_solve = {'ICT': (self.bcs, self.u_curr, self.p_curr)}
 
@@ -283,12 +316,12 @@ class BubbleMove(TwoPhaseFlows):
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return self.rho2*self.Appr_Heaviside(x,eps) + self.rho1*(1.0 - self.Appr_Heaviside(x,eps))
+        return self.rho2_rho1*self.Appr_Heaviside(x,eps) + (1.0 - self.Appr_Heaviside(x,eps))
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return self.mu2*self.Appr_Heaviside(x,eps) + self.mu1*(1.0 - self.Appr_Heaviside(x,eps))
+        return self.mu2_mu1*self.Appr_Heaviside(x,eps) + (1.0 - self.Appr_Heaviside(x,eps))
 
 
     """Set weak formulations"""
@@ -304,10 +337,10 @@ class BubbleMove(TwoPhaseFlows):
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
                 self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
-                                  self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                                  self.phi_curr, self.phi_old, self.eps, Re = self.Re, Fr = np.sqrt(self.At), We = 0.0)
             elif(self.NS_sol_method == 'ICT'):
                 self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
-                                     self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                                     self.phi_curr, self.phi_old, self.eps, Re = self.Re, Fr = np.sqrt(self.At), We = 0.0)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
         except ValueError as e:
@@ -317,39 +350,12 @@ class BubbleMove(TwoPhaseFlows):
             exit(1)
 
 
-    """Save the current state for post-processing and compute benchmark quantities"""
-    def plot_and_volume(self):
+    """Save the actual state for post-processing"""
+    def plot_and_save(self):
         #Save the actual state for visualization
-        if(self.n_iter % self.save_iters == 0):
-            self.vtkfile_u << (self.u_old, self.t)
-            self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
-            self.vtkfile_rho << (self.rho_interp, self.t)
-
-        #Compute benchamrk quantities
-        if(self.reinit_method == 'Conservative'):
-            Vol = assemble(conditional(lt(self.phi_old, 0.5), 1.0, 0.0)*dx)
-            Pa = 2.0*sqrt(np.pi*Vol)
-            Pb = assemble(mgrad(self.phi_old)*self.Appr_Delta(self.phi_old,self.eps)*dx)
-            Chi = Pa/Pb
-            Xc = assemble(Expression("x[0]", degree = 1)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
-            Yc = assemble(Expression("x[1]", degree = 1)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
-            Uc = assemble(inner(self.u_old,self.e1)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
-            Vc = assemble(inner(self.u_old,self.e2)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
-            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
-        elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            Vol = assemble(conditional(lt(self.phi_old, 0.0), 1.0, 0.0)*dx)
-            Pa = 2.0*sqrt(np.pi*Vol)
-            Pb = assemble(mgrad(self.phi_old)*self.Appr_Delta(self.phi_old,self.eps)*dx)
-            Chi = Pa/Pb
-            Xc = assemble(Expression("x[0]", degree = 1)*(conditional(lt(self.phi_old, 0.0), 1.0, 0.0))*dx)/Vol
-            Yc = assemble(Expression("x[1]", degree = 1)*(conditional(lt(self.phi_old, 0.0), 1.0, 0.0))*dx)/Vol
-            Uc = assemble(inner(self.u_old,self.e1)*(conditional(lt(self.phi_old, 0.0), 1.0, 0.0))*dx)/Vol
-            Vc = assemble(inner(self.u_old,self.e2)*(conditional(lt(self.phi_old, 0.0), 1.0, 0.0))*dx)/Vol
-            L2_gradphi = sqrt(assemble(inner(grad(self.phi_old),grad(self.phi_old))*dx)/(self.base*self.height))
-            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc,L2_gradphi]
-
-        if(self.rank == 0):
-            np.savetxt(self.timeseries, timeseries_vec)
+        self.vtkfile_u << (self.u_old, self.t*self.t0)
+        self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
+        self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
 
 
     """Execute simulation"""
@@ -369,22 +375,18 @@ class BubbleMove(TwoPhaseFlows):
         #Time-stepping loop parameters
         self.t = 0.0
         self.n_iter = 0
-        self.save_iters = self.Param["Saving_Frequency"]
         reinit_iters = self.Param["Reinitialization_Frequency"]
+        save_iters = self.Param["Saving_Frequency"]
 
         #File for plotting
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
 
-        #File for benchamrk comparisons
-        self.timeseries = open(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/benchmark_series.dat','wb')
-
         #Save initial state and start loop
-        self.plot_and_volume()
-        self.timeseries.close() #Close for safety in case some system fails to reach convergence
+        self.plot_and_save()
         self.t += self.dt
-        while self.t <= self.t_end:
-            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t) + " s")
+        while self.t <= self.t_stop:
+            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
             self.n_iter += 1
 
             #Solve level-set
@@ -396,9 +398,9 @@ class BubbleMove(TwoPhaseFlows):
             if(self.n_iter % reinit_iters == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
+                    if(self.reinit_method == 'Conservative'):
+                        self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2))
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
-                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute updated normal vector
                     end()
                 except Exception as e:
                     if(self.rank == 0):
@@ -419,18 +421,15 @@ class BubbleMove(TwoPhaseFlows):
             self.phi_old.assign(self.phi_curr)
 
             #Save and compute benchmark quantities
-            begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
-            self.timeseries = open(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/benchmark_series.dat','ab')
-            self.plot_and_volume()
-            self.timeseries.close() #Close for safety in case some system fails to reach convergence
-            end()
+            if(self.n_iter % save_iters == 0):
+                begin(int(LogLevel.INFO) + 1,"Saving data")
+                self.plot_and_save()
+                end()
 
             end()
 
-            self.t += self.dt if self.t + self.dt <= self.t_end or abs(self.t - self.t_end) < DOLFIN_EPS else self.t_end
+            self.t += self.dt if self.t + self.dt <= self.t_stop or abs(self.t - self.t_stop) < DOLFIN_EPS else self.t_stop
 
         #Save the final state
-        if(self.n_iter % self.save_iters != 0):
-            self.vtkfile_u << (self.u_old, self.t)
-            self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
-            self.vtkfile_rho << (self.rho_interp, self.t)
+        if(self.n_iter % save_iters != 0):
+            self.plot_and_save()
