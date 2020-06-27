@@ -57,20 +57,22 @@ class My_Parameters:
 
         try:
             self.parse_parameters(self.file)
+            #Close the file
+            self.file.close()
         except Exception as e:
             print("Caught an exception: " + str(e))
 
 
     """Parse parameters file into the standard FENICS Parameters class"""
     def parse_parameters(self, param_file):
-        for line in param_file.readlines():
+        for line in param_file.read().splitlines():
             if line.strip(): #Avoid reading blank lines
                 idx_eq = line.find(' = ')
                 if(idx_eq != -1):
                     if(line[0 : idx_eq] in self.Param.keys()):
-                        self.Param[line[0 : idx_eq]] = type(self.Param[line[0 : idx_eq]])(line[idx_eq + 3 : -1])
+                        self.Param[line[0 : idx_eq]] = type(self.Param[line[0 : idx_eq]])(line[idx_eq + 3 :])
                     else:
-                        self.Param.add(line[0 : idx_eq],line[idx_eq + 3 : -1])
+                        self.Param.add(line[0 : idx_eq],line[idx_eq + 3 :])
                 else:
                     raise Exception("Invalid format to read parameters. \
                                      Please check the configuration file: \
