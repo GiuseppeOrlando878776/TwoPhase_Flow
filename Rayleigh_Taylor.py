@@ -131,6 +131,9 @@ class RayleighTaylor(TwoPhaseFlows):
             self.alpha = self.Param["Stabilization_Parameter"]
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['IP'] = self.alpha
+            #Share interior facets
+            if(MPI.size(self.comm) > 1):
+                parameters["ghost_mode"] = "shared_facet"
         elif(self.stab_method == 'SUPG'):
             self.scaling = self.Param["Stabilization_Parameter"]
             #Auxiliary dictionary in order to set the proper parameter for stabilization
