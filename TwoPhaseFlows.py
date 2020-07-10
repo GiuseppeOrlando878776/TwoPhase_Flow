@@ -210,13 +210,13 @@ class TwoPhaseFlows():
 
 
     """SUPG method"""
-    def SUPG(self, phi, l, phi_old, u_old, dt, mesh, Re):
+    def SUPG(self, phi, l, phi_old, u_old, dt, mesh, scaling):
         #Extract cell diameter
         h = CellDiameter(mesh)
 
         #Compute the stabilization term
         r = ((phi - phi_old)/dt + inner(u_old, grad(phi)))* \
-            h/ufl.Max(2.0*sqrt(inner(u_old,u_old)), 4.0/(Re*h))*inner(u_old, grad(l))*dx
+            scaling*h/ufl.Max(norm(u_old,'L2'),1.0e-3/h)*inner(u_old, grad(l))*dx
         return r
 
 
@@ -241,7 +241,7 @@ class TwoPhaseFlows():
         if(method == 'SUPG'):
             #Check whether Reynolds number is really available
             assert param is not None, \
-            "Reynolds number not available in order to use SUPG stabilization (check the call of the function)"
+            "Stabilization parameter not available in order to use SUPG stabilization (check the call of the function)"
 
             #Add the stabilization term
             F1 += self.SUPG(phi, l, phi_old, u_old, dt, mesh, param)

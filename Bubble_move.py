@@ -93,17 +93,9 @@ class BubbleMove(TwoPhaseFlows):
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['IP'] = self.alpha
         elif(self.stab_method == 'SUPG'):
-            try:
-                self.Re = float(self.Param["Reynolds_number"])
-                if(self.Re < 1.0):
-                    raise ValueError("Invalid Reynolds number specified")
-                self.L0 = (self.mu2*self.Re/(self.rho2*np.sqrt(self.g)))**(2/3)
-            except RuntimeError as e:
-                #In case Reynolds number is not present, compute it automatically
-                self.L0 = 1.0
-                self.Re = self.rho2*self.L0*np.sqrt(self.L0*0.98)/self.mu2
-                assert self.Re > 1.0, "Invalid Reynolds number computed"
-            self.switcher_parameter['SUPG'] = self.Re
+            self.scaling = self.Param["Stabilization_Parameter"]
+            #Auxiliary dictionary in order to set the proper parameter for stabilization
+            self.switcher_parameter['SUPG'] = self.scaling
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)

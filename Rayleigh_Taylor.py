@@ -132,8 +132,9 @@ class RayleighTaylor(TwoPhaseFlows):
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['IP'] = self.alpha
         elif(self.stab_method == 'SUPG'):
+            self.scaling = self.Param["Stabilization_Parameter"]
             #Auxiliary dictionary in order to set the proper parameter for stabilization
-            self.switcher_parameter['SUPG'] = self.Re
+            self.switcher_parameter['SUPG'] = self.scaling
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
