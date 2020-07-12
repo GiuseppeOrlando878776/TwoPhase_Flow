@@ -31,13 +31,13 @@ This section describes the options available:
 - **Polynomial_degree**: degree of polynomial for NS P<sub>k+1</sub>/P<sub>k</sub> with k ≥ 1 (1 by default)
 - **Number_vertices_x**: number of points in x direction (80 by default)
 - **Number_vertices_y**: number of points in y direction (160 by default)
-- **Interface_Thickness**: value of the thickness of interface (0.025 by default)
+- **Interface_Thickness**: value of the thickness of interface for non-conservative level-set method (0.025 by default)
 - **Reinit_Type**: choice of level-set policy between 'Non_Conservative_Hyperbolic' or 'Conservative' ('Non_Conservative_Hyperbolic' by default)
 - **Reinitialization_Frequency**: how often reinitialization has to be performed (1 by default)
 - **Tolerance_recon**: tolerance for reinitialization step (10<sup>-4</sup> by default)
 - **Maximum_subiters_recon**: maximum number of iterations for reinitialization step (10 by default)
 - **Stabilization_Type**: choice of stabilization between 'None','IP' and 'SUPG' ('SUPG' by default)
-- **Stabilization_Parameter**: parameter for IP (0.1 by default)
+- **Stabilization_Parameter**: parameter for stabilization (0.01 by default)
 - **NS_Procedure**: way of solving NS between 'Standard' and 'ICT' ('ICT' by default)
 - **Settings_Type**: way of reading data for RT instability between 'Physical' and 'Parameters' ('Physical' by default)
 - **Interface_Perturbation_RT**: initial perturbation for RT instability between 'Cos' and 'Tanh' ('Cos' by default)
@@ -69,7 +69,7 @@ The code is able to support parallel computations; therefore if MPI is available
 ```
 mpirun -n nproc python3 main.py your_config_file
 ```
-where nproc is the number of cores you want to employ.
+where nproc is the number of processes you want to employ.
 
 ## Post-processing
 For the rising bubble there are some interesting benchmark quantities whose value is saved throughout the simulation. \
@@ -79,7 +79,7 @@ The MATLAB version can be executed as follows:
 ```
 matlab -r "post_process(your_config_file)"
 ```
-whereas the Python version can be run in this way:
+with the name of the file between quotes, whereas the Python version can be run in this way:
 ```
 python3 post_process.py your_config_file
 ```

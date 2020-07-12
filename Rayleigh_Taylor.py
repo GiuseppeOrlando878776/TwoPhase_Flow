@@ -432,7 +432,7 @@ class RayleighTaylor(TwoPhaseFlows):
 
             end()
 
-            self.t += self.dt if self.t + self.dt <= self.t_stop or abs(self.t - self.t_stop) < DOLFIN_EPS else self.t_stop
+            self.t = self.t + self.dt if self.t + self.dt <= self.t_stop or abs(self.t - self.t_stop) < DOLFIN_EPS else self.t_stop
 
         #Save the final state
         if(self.n_iter % save_iters != 0):

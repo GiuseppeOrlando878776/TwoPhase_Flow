@@ -1,7 +1,7 @@
 import os
 import sys
 import numpy as np
-import matplotlib as plt
+import matplotlib.pyplot as plt
 
 #Find the name of the file you eant post-process: if no argument is present supply with a default one
 nargin = len(sys.argv)
@@ -46,7 +46,7 @@ if(reinit_type == 'Non_Conservative_Hyperbolic'):
     Yc = data[4::8]
     Uc = data[5::8]
     Vc = data[6::8]
-    L2_gradphi = data[7::8]
+    L2_grad_phi = data[7::8]
 elif(reinit_type == 'Conservative'):
     assert np.size(data) % 7 == 0, 'Wrong number of values in the file'
     t = data[0::7]
@@ -62,14 +62,14 @@ plt.figure()
 plt.plot(t,Vol)
 plt.xlabel('t')
 plt.ylabel('Area')
-plt.title('Area evolution in time')
+plt.title('Area evolution in time',fontweight="bold")
 
 #Plot circularity behaviour
 plt.figure()
 plt.plot(t,chi)
 plt.xlabel('t')
 plt.ylabel('Circularity')
-plt.title('Degree of circularity evolution in time')
+plt.title('Degree of circularity evolution in time',fontweight="bold")
 
 #Plot horizontal component for centroid and rising velocity
 plt.figure()
@@ -77,12 +77,12 @@ plt.subplot(1,2,1)
 plt.plot(t,Xc)
 plt.xlabel('t')
 plt.ylabel('$x_c$')
-plt.title('Time evolution of $x_c$ coordinate of the centroid')
+plt.title('Time evolution of $x_c$ coordinate of the centroid',fontweight="bold")
 plt.subplot(1,2,2)
 plt.plot(t,Uc)
 plt.xlabel('t')
 plt.ylabel('$u_c$')
-plt.title('Time evolution of $u_c$ coordinate of the rising velocity')
+plt.title('Time evolution of $u_c$ coordinate of the rising velocity',fontweight="bold")
 
 #Plot vertical component for centroid and rising velocity
 plt.figure()
@@ -90,19 +90,19 @@ plt.subplot(1,2,1)
 plt.plot(t,Yc)
 plt.xlabel('t')
 plt.ylabel('$y_c$')
-plt.title('Time evolution of $y_c$ coordinate of the centroid')
+plt.title('Time evolution of $y_c$ coordinate of the centroid',fontweight="bold")
 plt.subplot(1,2,2)
 plt.plot(t,Vc)
 plt.xlabel('t')
 plt.ylabel('$v_c$')
-plt.title('Time evolution of $v_c$ coordinate of the rising velocity')
+plt.title('Time evolution of $v_c$ coordinate of the rising velocity',fontweight="bold")
 
 #Plot grad_phi if necessary
 if(reinit_type == 'Non_Conservative_Hyperbolic'):
     plt.figure()
     plt.plot(t,L2_grad_phi)
     plt.xlabel('t')
-    plt.ylabel('$\left|\nabla\phi\right|$')
-    title('Time evolution of average $\left|\nabla\phi\right|$')
+    plt.ylabel('grad($\phi$)')
+    plt.title('Time evolution of average grad($\phi$)',fontweight="bold")
 
 plt.show()

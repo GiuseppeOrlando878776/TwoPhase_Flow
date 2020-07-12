@@ -74,7 +74,7 @@ plot(t,Uc)
 xlabel('t')
 ylabel('u_c')
 title('Time evolution of u_c coordinate of the rising velocity')
-    
+
 %%Plot vertical component for centroid and rising velocity
 figure()
 subplot(1,2,1)
@@ -93,8 +93,8 @@ if(strcmp(reinit_type, 'Non_Conservative_Hyperbolic'))
     figure()
     plot(t,L2_grad_phi)
     xlabel('t')
-    ylabel('\left|\nabla\phi\right|')
-    title('Time evolution of average \left|\nabla\phi\right|')
+    ylabel('grad(\phi)')
+    title('Time evolution of average grad(\phi)')
 end
 
 end

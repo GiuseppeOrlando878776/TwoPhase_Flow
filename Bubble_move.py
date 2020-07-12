@@ -94,7 +94,7 @@ class BubbleMove(TwoPhaseFlows):
             self.switcher_parameter['IP'] = self.alpha
             #Share interior facets
             if(MPI.size(self.comm) > 1):
-                parameters["ghost_mode"] = "shared_facet"            
+                parameters["ghost_mode"] = "shared_facet"
         elif(self.stab_method == 'SUPG'):
             self.scaling = self.Param["Stabilization_Parameter"]
             #Auxiliary dictionary in order to set the proper parameter for stabilization
@@ -422,7 +422,7 @@ class BubbleMove(TwoPhaseFlows):
 
             end()
 
-            self.t += self.dt if self.t + self.dt <= self.t_end or abs(self.t - self.t_end) < DOLFIN_EPS else self.t_end
+            self.t = self.t + self.dt if self.t + self.dt <= self.t_end or abs(self.t - self.t_end) < DOLFIN_EPS else self.t_end
 
         #Save the final state
         if(self.n_iter % self.save_iters != 0):
