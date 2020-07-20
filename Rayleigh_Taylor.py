@@ -60,7 +60,7 @@ class RayleighTaylor(TwoPhaseFlows):
         self.deg_LS = self.Param["Polynomial_degree_LS"]
         self.deg_NS = self.Param["Polynomial_degree_NS"]
         self.reinit_method = self.Param["Reinit_Type"]
-        self.LS_sol_method   = self.Param["LS_Procedure"]
+        self.LS_sol_method = self.Param["LS_Procedure"]
         self.NS_sol_method = self.Param["NS_Procedure"]
 
         #Check correctness of Level-Set method
@@ -145,6 +145,11 @@ class RayleighTaylor(TwoPhaseFlows):
             elif(self.stab_method == 'SUPG'):
                 self.scaling = self.Param["Stabilization_Parameter"]
                 self.switcher_parameter['SUPG'] = self.scaling
+        elif(self.LS_sol_method == 'DG'):
+            self.gamma = self.Param["Stabilization_Parameter"]
+            #Share interior facets
+            if(MPI.size(self.comm) > 1):
+                parameters["ghost_mode"] = "shared_facet"
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
@@ -346,7 +351,7 @@ class RayleighTaylor(TwoPhaseFlows):
                 self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, \
                                   self.stab_method, self.switcher_parameter[self.stab_method])
             elif(self.LS_sol_method == 'DG'):
-                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh)
+                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, self.gamma)
 
             #Set variational problem for reinitialization
             self.switcher_reinit_varf[self.reinit_method](*self.switcher_arguments_reinit_varf[self.reinit_method])

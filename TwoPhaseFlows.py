@@ -221,7 +221,7 @@ class TwoPhaseFlows():
         return r
 
 
-    """Level-set weak formulation"""
+    """Level-set weak formulation (continuous discretization)"""
     def LS_weak_form(self, phi, l, phi_old, u_old, dt, mesh, method, param = None):
         #Check availability of the method before proceding
         assert method in self.stab_dict, "Stabilization method(" + method + ") not available"
@@ -253,6 +253,35 @@ class TwoPhaseFlows():
 
             #Add the stabilization term
             F1 += self.IP(phi, l, mesh, param)
+
+        #Save corresponding weak forms
+        self.a1 = lhs(F1)
+        self.L1 = rhs(F1)
+
+        #Declare matrix and vector for solving
+        self.A1 = PETScMatrix()
+        self.b1 = PETScVector()
+
+
+    """Level-set weak formulation (DG discretization)"""
+    def LS_weak_form_DG(self, phi, l, phi_old, u_old, dt, mesh, param):
+        #Check the correctness of type
+        if(not isinstance(phi_old, Function)):
+            raise ValueError("phi_old must be an instance of Function")
+        if(not isinstance(u_old, Function)):
+            raise ValueError("u_old must be an instance of Function")
+
+        #Save the dimension of the problem
+        self.n_dim = mesh.geometry().dim()
+
+        #Save the normal to internal facets
+        n_mesh = FacetNormal(mesh)
+
+        #Declare weak formulation
+        F1 = (phi - phi_old)/dt*l*dx - phi*inner(u_old, grad(l))*dx \
+           + avg(phi)*inner(u_old, jump(l,n_mesh))*dS \
+           + avg(l)*inner(u_old, jump(phi,n_mesh))*dS \
+           + param*inner(jump(phi,n_mesh), jump(l,n_mesh))*dS
 
         #Save corresponding weak forms
         self.a1 = lhs(F1)
