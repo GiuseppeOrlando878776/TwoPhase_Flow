@@ -58,14 +58,15 @@ class BubbleMove(TwoPhaseFlows):
         #Since this parameters are more related to the numeric part
         #rather than physics we set a default value
         #and so they are present for sure
-        self.deg = self.Param["Polynomial_degree"]
+        self.deg_LS = self.Param["Polynomial_degree_LS"]
+        self.deg_NS = self.Param["Polynomial_degree_NS"]
         self.reinit_method = self.Param["Reinit_Type"]
-        self.stab_method   = self.Param["Stabilization_Type"]
+        self.LS_sol_method = self.Param["LS_Procedure"]
         self.NS_sol_method = self.Param["NS_Procedure"]
 
         #Check correctness of Level-set method
-        if(self.stab_method not in self.stab_dict):
-            raise ValueError("Stabilization method not available")
+        if(self.LS_sol_method not in self.LS_sol_dict):
+            raise ValueError("Solution method for Level-set not available")
 
         #Check correctness of Navier-Stokes method
         if(self.NS_sol_method not in self.NS_sol_dict):
@@ -86,19 +87,25 @@ class BubbleMove(TwoPhaseFlows):
                 self.solver_ICT_3 = "cg"
                 self.precon_ICT_3 = "icc"
 
-        #Prepare useful variables for stabilization
-        self.switcher_parameter = {self.stab_method: None}
-        if(self.stab_method == 'IP'):
-            self.alpha = self.Param["Stabilization_Parameter"]
-            #Auxiliary dictionary in order to set the proper parameter for stabilization
-            self.switcher_parameter['IP'] = self.alpha
-            #Share interior facets
-            if(MPI.size(self.comm) > 1):
-                parameters["ghost_mode"] = "shared_facet"
-        elif(self.stab_method == 'SUPG'):
-            self.scaling = self.Param["Stabilization_Parameter"]
-            #Auxiliary dictionary in order to set the proper parameter for stabilization
-            self.switcher_parameter['SUPG'] = self.scaling
+        #Prepare useful variables for stabilization in case of continuous level-set
+        if(self.LS_sol_method == 'Continuous'):
+            #Check correctness of reinitialization
+            self.stab_method = self.Param["Stabilization_Type"]
+            if(self.stab_method not in self.stab_dict):
+                raise ValueError("Solution method for Level-set not available")
+
+            #Prepare dictionaries (for input function in weak form setting)
+            #and stabilization parameters
+            self.switcher_parameter = {self.stab_method: None}
+            if(self.stab_method == 'IP'):
+                self.alpha = self.Param["Stabilization_Parameter"]
+                self.switcher_parameter['IP'] = self.alpha
+                #Share interior facets
+                if(MPI.size(self.comm) > 1):
+                    parameters["ghost_mode"] = "shared_facet"
+            elif(self.stab_method == 'SUPG'):
+                self.scaling = self.Param["Stabilization_Parameter"]
+                self.switcher_parameter['SUPG'] = self.scaling
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
@@ -129,15 +136,18 @@ class BubbleMove(TwoPhaseFlows):
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
 
         #Define FE spaces
-        if(self.deg == 0):
+        if(self.deg_NS == 0):
             raise ValueError("Invalid degree for polynomials employed in Navier-Stokes (the pair P1-P0 is not stable)")
-        Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg + 1)
-        Pelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg)
+        Velem = VectorElement("Lagrange", self.mesh.ufl_cell(), self.deg_NS + 1)
+        Pelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg_NS)
         self.V  = FunctionSpace(self.mesh, Velem)
         self.P  = FunctionSpace(self.mesh, Pelem)
         if(self.NS_sol_method == 'Standard'):
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
-        self.Q  = FunctionSpace(self.mesh, "CG", 2)
+        if(self.LS_sol_method == 'Continuous'):
+            self.Q  = FunctionSpace(self.mesh, "CG", self.deg_LS)
+        elif(self.LS_sol_method == 'DG'):
+            self.Q  = FunctionSpace(self.mesh, "DG", self.deg_LS)
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
@@ -290,8 +300,11 @@ class BubbleMove(TwoPhaseFlows):
     def set_weak_forms(self):
         try:
             #Set variational problem for step 1 (Level-set)
-            self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, \
-                              self.stab_method, self.switcher_parameter[self.stab_method])
+            if(self.LS_sol_method == 'Continuous'):
+                self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, \
+                                  self.stab_method, self.switcher_parameter[self.stab_method])
+            elif(self.LS_sol_method == 'DG'):
+                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh)
 
             #Set variational problem for reinitialization
             self.switcher_reinit_varf[self.reinit_method](*self.switcher_arguments_reinit_varf[self.reinit_method])

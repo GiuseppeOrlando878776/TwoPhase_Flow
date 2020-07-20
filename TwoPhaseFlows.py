@@ -7,6 +7,7 @@ class TwoPhaseFlows():
     def __init__(self):
         #Define auxiliary dictionaries to set proper stabilization,
         #solution method for Navier-Stokes and reinitialization
+        self.LS_sol_dict = {'DG', 'Continuous'}
         self.stab_dict = {'IP', 'SUPG', 'None'}
         self.NS_sol_dict = {'Standard', 'ICT'}
         self.reinit_method_dict = {'Non_Conservative_Hyperbolic', 'Conservative'}
