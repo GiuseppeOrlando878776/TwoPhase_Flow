@@ -221,6 +221,7 @@ class RayleighTaylor(TwoPhaseFlows):
                                                  #reinitialization and it is also useful for clearness
 
         #Define function and vector for saving purposes
+        self.lev_set    = Function(self.Q)
         self.rho_interp = Function(self.Q)
 
         #Declare function for normal vector (in case of conservative level-set method)
@@ -376,7 +377,15 @@ class RayleighTaylor(TwoPhaseFlows):
 
     """Save the actual state for post-processing"""
     def plot_and_save(self):
+        #Extract vector for FE function
+        self.phi_vec = self.phi_old.vector().get_local()
+        #Construct vector of ones inside the bubble
+        self.tmp = 1.0*(self.phi_vec < 0.0)
+        #Assign vector to FE function
+        self.lev_set.vector().set_local(self.tmp)
+
         #Save the actual state for visualization
+        self.vtkfile_phi << (self.lev_set, self.t*self.t0)
         self.vtkfile_u << (self.u_old, self.t*self.t0)
         self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
         self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
@@ -403,6 +412,7 @@ class RayleighTaylor(TwoPhaseFlows):
         save_iters = self.Param["Saving_Frequency"]
 
         #File for plotting
+        self.vtkfile_phi = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/phi.pvd')
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
 
@@ -419,7 +429,7 @@ class RayleighTaylor(TwoPhaseFlows):
             end()
 
             #Solve Level-set reinit
-            if(self.n_iter % reinit_iters == 0):
+            if(reinit_iters != 0 and self.n_iter % reinit_iters == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                     if(self.reinit_method == 'Conservative'):

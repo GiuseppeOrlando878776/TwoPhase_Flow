@@ -185,6 +185,7 @@ class BubbleMove(TwoPhaseFlows):
                                                  #reinitialization and it is also useful for clearness
 
         #Define function and vector for plotting level-set and computing volume
+        self.lev_set    = Function(self.Q)
         self.rho_interp = Function(self.Q)
 
         #Parameters for reinitialization steps
@@ -336,6 +337,17 @@ class BubbleMove(TwoPhaseFlows):
     def plot_and_volume(self):
         #Save the actual state for visualization
         if(self.n_iter % self.save_iters == 0):
+            #Extract vector for FE function
+            self.phi_vec = self.phi_old.vector().get_local()
+            #Construct vector of ones inside the bubble
+            if(self.reinit_method == 'Conservative'):
+                self.tmp = 1.0*(self.phi_vec < 0.5)
+            elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+                self.tmp = 1.0*(self.phi_vec < 0.0)
+            #Assign vector to FE function
+            self.lev_set.vector().set_local(self.tmp)
+
+            self.vtkfile_phi << (self.lev_set, self.t)
             self.vtkfile_u << (self.u_old, self.t)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
@@ -388,6 +400,7 @@ class BubbleMove(TwoPhaseFlows):
         reinit_iters = self.Param["Reinitialization_Frequency"]
 
         #File for plotting
+        self.vtkfile_phi = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/phi.pvd')
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
 
@@ -408,7 +421,7 @@ class BubbleMove(TwoPhaseFlows):
             end()
 
             #Solve Level-set reinit
-            if(self.n_iter % reinit_iters == 0):
+            if(reinit_iters != 0 and self.n_iter % reinit_iters == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                     self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
