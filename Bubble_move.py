@@ -107,7 +107,6 @@ class BubbleMove(TwoPhaseFlows):
                 self.scaling = self.Param["Stabilization_Parameter"]
                 self.switcher_parameter['SUPG'] = self.scaling
         elif(self.LS_sol_method == 'DG'):
-            self.gamma = self.Param["Stabilization_Parameter"]
             #Share interior facets
             if(MPI.size(self.comm) > 1):
                 parameters["ghost_mode"] = "shared_facet"
@@ -201,7 +200,10 @@ class BubbleMove(TwoPhaseFlows):
 
             #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
-            self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form}
+            if(self.LS_sol_method == 'Continuous'):
+                self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form}
+            elif(self.LS_sol_method == 'DG'):
+                self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form_DG}
             self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
                                                    (self.phi, self.l, self.phi0, self.phi_curr, self.dt_reinit, \
                                                     self.gamma_reinit, self.beta_reinit)}
@@ -309,7 +311,7 @@ class BubbleMove(TwoPhaseFlows):
                 self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, \
                                   self.stab_method, self.switcher_parameter[self.stab_method])
             elif(self.LS_sol_method == 'DG'):
-                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, self.gamma)
+                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh)
 
             #Set variational problem for reinitialization
             self.switcher_reinit_varf[self.reinit_method](*self.switcher_arguments_reinit_varf[self.reinit_method])

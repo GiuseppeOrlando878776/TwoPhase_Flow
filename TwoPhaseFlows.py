@@ -264,7 +264,7 @@ class TwoPhaseFlows():
 
 
     """Level-set weak formulation (DG discretization)"""
-    def LS_weak_form_DG(self, phi, l, phi_old, u_old, dt, mesh, param):
+    def LS_weak_form_DG(self, phi, l, phi_old, u_old, dt, mesh):
         #Check the correctness of type
         if(not isinstance(phi_old, Function)):
             raise ValueError("phi_old must be an instance of Function")
@@ -275,13 +275,12 @@ class TwoPhaseFlows():
         self.n_dim = mesh.geometry().dim()
 
         #Save the normal to internal facets
-        n_mesh = FacetNormal(mesh)
+        self.n_mesh = FacetNormal(mesh)
 
         #Declare weak formulation
         F1 = (phi - phi_old)/dt*l*dx - phi*inner(u_old, grad(l))*dx \
-           + avg(phi)*inner(u_old, jump(l,n_mesh))*dS \
-           + avg(l)*inner(u_old, jump(phi,n_mesh))*dS \
-           + param*inner(jump(phi,n_mesh), jump(l,n_mesh))*dS
+           + avg(phi)*inner(u_old, jump(l,self.n_mesh))*dS \
+           + avg(l)*inner(u_old, jump(phi,self.n_mesh))*dS \
 
         #Save corresponding weak forms
         self.a1 = lhs(F1)
@@ -305,6 +304,27 @@ class TwoPhaseFlows():
         self.L1_reinit = (phi0/dt_reinit)*l*dx \
                        + signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx \
                        - beta_reinit*inner(grad(phi0), grad(l))*dx
+
+        #Save the matrix (that will not change during computations) and declare vector
+        self.A1_reinit = assemble(self.a1_reinit)
+        self.b1_reinit = PETScVector()
+
+
+    """Weak form non-conservative reinitialization (hyperbolic version DG)"""
+    def NCLSM_hyperbolic_weak_form_DG(self, phi, l, phi0, phi_curr, dt_reinit, gamma_reinit, beta_reinit):
+        #Check correctness of types
+        if(not isinstance(phi0, Function)):
+            raise ValueError("phi0 must be an instance of Function")
+        if(not isinstance(phi_curr, Function)):
+            raise ValueError("phi_curr must be an instance of Function")
+
+        #Declare weak formulation
+        self.a1_reinit = (phi/dt_reinit)*l*dx
+        self.L1_reinit = (phi0/dt_reinit)*l*dx \
+                       + signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx \
+                       - beta_reinit*inner(grad(phi0), grad(l))*dx \
+                       + beta_reinit*jump(grad(phi0), self.n_mesh)*avg(l)*dS \
+                       + beta_reinit*inner(avg(grad(phi0)), jump(l,self.n_mesh))*dS
 
         #Save the matrix (that will not change during computations) and declare vector
         self.A1_reinit = assemble(self.a1_reinit)
