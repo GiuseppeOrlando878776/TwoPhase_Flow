@@ -280,7 +280,7 @@ class TwoPhaseFlows():
         #Declare weak formulation
         F1 = (phi - phi_old)/dt*l*dx - phi*inner(u_old, grad(l))*dx \
            + avg(phi)*inner(u_old, jump(l,self.n_mesh))*dS \
-           + avg(l)*inner(u_old, jump(phi,self.n_mesh))*dS \
+           + 0.5*abs(inner(u_old, self.n_mesh('+')))*inner(jump(phi,self.n_mesh), jump(l,self.n_mesh))*dS \
 
         #Save corresponding weak forms
         self.a1 = lhs(F1)
@@ -323,8 +323,6 @@ class TwoPhaseFlows():
         self.L1_reinit = (phi0/dt_reinit)*l*dx \
                        + signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx \
                        - beta_reinit*inner(grad(phi0), grad(l))*dx \
-                       + beta_reinit*jump(grad(phi0), self.n_mesh)*avg(l)*dS \
-                       + beta_reinit*inner(avg(grad(phi0)), jump(l,self.n_mesh))*dS
 
         #Save the matrix (that will not change during computations) and declare vector
         self.A1_reinit = assemble(self.a1_reinit)
