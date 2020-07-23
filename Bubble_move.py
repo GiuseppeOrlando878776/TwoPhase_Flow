@@ -151,7 +151,8 @@ class BubbleMove(TwoPhaseFlows):
         if(self.LS_sol_method == 'Continuous'):
             self.Q  = FunctionSpace(self.mesh, "CG", self.deg_LS)
         elif(self.LS_sol_method == 'DG'):
-            self.Q  = FunctionSpace(self.mesh, "DG", self.deg_LS)
+            self.Q      = FunctionSpace(self.mesh, "DG", self.deg_LS)
+            self.Qcont  = FunctionSpace(self.mesh, "CG", self.deg_LS)
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
@@ -163,8 +164,14 @@ class BubbleMove(TwoPhaseFlows):
             self.v = TestFunction(self.V)
             self.p = TrialFunction(self.P)
             self.q = TestFunction(self.P)
-        self.phi = TrialFunction(self.Q)
-        self.l   = TestFunction(self.Q)
+        if(self.LS_sol_method == 'Continuous'):
+            self.phi = TrialFunction(self.Q)
+            self.l   = TestFunction(self.Q)
+        elif(self.LS_sol_method == 'DG'):
+            self.lev  = TrialFunction(self.Q)
+            self.dgl  = TestFunction(self.Q)
+            self.phi  = TrialFunction(self.Qcont)
+            self.l    = TestFunction(self.Qcont)
 
         #Define functions to store solution
         self.u_curr   = Function(self.V)
@@ -173,20 +180,35 @@ class BubbleMove(TwoPhaseFlows):
         self.p_old    = Function(self.P)
         if(self.NS_sol_method == 'Standard'):
             self.w_curr = Function(self.W)
-        self.phi_curr = Function(self.Q)
-        self.phi_old  = Function(self.Q)
+        if(self.LS_sol_method == 'Continuous'):
+            self.phi_curr = Function(self.Q)
+            self.phi_old  = Function(self.Q)
+        elif(self.LS_sol_method == 'DG'):
+            self.phi_curr = Function(self.Qcont)
+            self.phi_old  = Function(self.Qcont)
+            self.levset_curr = Function(self.Q)
+            self.levset_old  = Function(self.Q)
 
         #Define function to store the normal
         self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
-        self.phi0 = Function(self.Q)
-        self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
-                                                 #reinitialization and it is also useful for clearness
+        if(self.LS_sol_method == 'Continuous'):
+            self.phi0 = Function(self.Q)
+            self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
+                                                     #reinitialization and it is also useful for clearness
+        elif(self.LS_sol_method == 'DG'):
+            self.phi0 = Function(self.Qcont)
+            self.phi_intermediate = Function(self.Qcont) #This is fundamental in case on 'non-conservative'
+                                                         #reinitialization and it is also useful for clearness
 
         #Define function and vector for plotting level-set and computing volume
-        self.lev_set    = Function(self.Q)
-        self.rho_interp = Function(self.Q)
+        if(self.LS_sol_method == 'Continuous'):
+            self.levset     = Function(self.Q)
+            self.rho_interp = Function(self.Q)
+        elif(self.LS_sol_method == 'DG'):
+            self.levset     = Function(self.Qcont)
+            self.rho_interp = Function(self.Qcont)
 
         #Parameters for reinitialization steps
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
@@ -253,11 +275,19 @@ class BubbleMove(TwoPhaseFlows):
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                             A = center[0], B = center[1], r = radius, degree = 2)
-            self.phi_old.assign(interpolate(f,self.Q))
+            if(self.LS_sol_method == 'Continuous'):
+                self.phi_old.assign(interpolate(f,self.Q))
+            elif(self.LS_sol_method == 'DG'):
+                self.levset_old.assign(interpolate(f,self.Q))
+                self.phi_old.assign(interpolate(f,self.Qcont))
         elif(self.reinit_method == 'Conservative'):
             f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
                             A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
-            self.phi_old.assign(interpolate(f, self.Q))
+            if(self.LS_sol_method == 'Continuous'):
+                self.phi_old.assign(interpolate(f,self.Q))
+            elif(self.LS_sol_method == 'DG'):
+                self.levset_old.assign(interpolate(f,self.Q))
+                self.phi_old.assign(interpolate(f,self.Qcont))
 
 
     """Assemble boundary condition"""
@@ -312,7 +342,7 @@ class BubbleMove(TwoPhaseFlows):
                 self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, \
                                   self.stab_method, self.switcher_parameter[self.stab_method])
             elif(self.LS_sol_method == 'DG'):
-                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh)
+                self.LS_weak_form_DG(self.lev, self.dgl, self.levset_old, self.u_old, self.DT, self.mesh)
 
             #Set variational problem for reinitialization
             self.switcher_reinit_varf[self.reinit_method](*self.switcher_arguments_reinit_varf[self.reinit_method])
@@ -345,11 +375,14 @@ class BubbleMove(TwoPhaseFlows):
             elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
                 self.tmp = 1.0*(self.phi_vec < 0.0)
             #Assign vector to FE function
-            self.lev_set.vector().set_local(self.tmp)
+            self.levset.vector().set_local(self.tmp)
 
-            self.vtkfile_phi << (self.lev_set, self.t)
+            self.vtkfile_phi << (self.levset, self.t)
             self.vtkfile_u << (self.u_old, self.t)
-            self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
+            if(self.LS_sol_method == 'Continuous'):
+                self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
+            elif(self.LS_sol_method == 'DG'):
+                self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Qcont))
             self.vtkfile_rho << (self.rho_interp, self.t)
 
         #Compute benchamrk quantities
@@ -417,7 +450,12 @@ class BubbleMove(TwoPhaseFlows):
 
             #Solve level-set
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
-            self.solve_Levelset_system(self.phi_curr)
+            if(self.LS_sol_method == 'Continuous'):
+                self.solve_Levelset_system(self.phi_curr)
+            elif(self.LS_sol_method == 'DG'):
+                self.solve_Levelset_system(self.levset_curr)
+                self.phi_curr.assign(project(self.levset_curr, self.Qcont))
+                self.phi_old.assign(project(self.levset_old, self.Qcont))
             end()
 
             #Solve Level-set reinit
@@ -445,6 +483,8 @@ class BubbleMove(TwoPhaseFlows):
             self.u_old.assign(self.u_curr)
             self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
+            if(self.LS_sol_method == 'DG'):
+                self.levset_old.assign(self.levset_curr)
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
@@ -459,6 +499,16 @@ class BubbleMove(TwoPhaseFlows):
 
         #Save the final state
         if(self.n_iter % self.save_iters != 0):
+            self.phi_vec = self.phi_old.vector().get_local()
+            if(self.reinit_method == 'Conservative'):
+                self.tmp = 1.0*(self.phi_vec < 0.5)
+            elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+                self.tmp = 1.0*(self.phi_vec < 0.0)
+            self.levset.vector().set_local(self.tmp)
+            self.vtkfile_phi << (self.levset, self.t)
             self.vtkfile_u << (self.u_old, self.t)
-            self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
+            if(self.LS_sol_method == 'Continuous'):
+                self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
+            elif(self.LS_sol_method == 'DG'):
+                self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Qcont))
             self.vtkfile_rho << (self.rho_interp, self.t)
