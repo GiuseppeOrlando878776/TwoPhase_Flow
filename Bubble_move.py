@@ -29,9 +29,7 @@ class BubbleMove(TwoPhaseFlows):
         self.comm = MPI.comm_world
         self.rank = MPI.rank(self.comm)
 
-        #Check coherence of dimensional choice
-        if(self.Param["Reference_Dimensionalization"] != 'Dimensional'):
-            raise ValueError("This instance of the problem 'BubbleMove' works in a dimensional framework")
+        self.dim_choice = self.Param["Reference_Dimensionalization"]
 
         try:
             self.rho1  = float(self.Param["Lighter_density"])
@@ -48,7 +46,7 @@ class BubbleMove(TwoPhaseFlows):
 
         #Check correctness of data read
         if(self.rho1 < DOLFIN_EPS or self.rho2 < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or self.mu2 < DOLFIN_EPS \
-           or self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.g < DOLFIN_EPS or self.sigma < DOLFIN_EPS):
+           or self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.g < 0.0 or self.sigma < 0.0):
             raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
         if(self.dt > self.t_end):
             raise ValueError("Time-step greater than final time")
@@ -120,6 +118,22 @@ class BubbleMove(TwoPhaseFlows):
         #Detect properties for reconstrution step
         self.tol_recon = self.Param["Tolerance_recon"]
         self.max_subiters = self.Param["Maximum_subiters_recon"]
+
+        #Build adimensional parameters in case needed
+        self.t0 = 1.0
+        self.U0 = 1.0
+        if(self.dim_choice == 'Non_Dimensional'):
+            self.L0 = 1.0 #Reference length
+            self.U0 = sqrt(self.g*self.L0)
+            self.t0 = self.L0/self.U0
+            self.t_end = self.t_end/self.t0
+            self.rho1_rho2 = self.rho1/self.rho2
+            self.mu1_mu2 = self.mu1/self.mu2
+            self.Re = self.rho2*self.L0*sqrt(self.g*self.L0)/self.mu2
+            if(self.sigma > DOLFIN_EPS):
+                self.Bo = self.rho2*self.g*self.L0*self.L0/self.sigma
+            else:
+                self.Bo = 0.0
 
 
     """Return the communicator"""
@@ -326,12 +340,18 @@ class BubbleMove(TwoPhaseFlows):
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return self.rho2*self.Appr_Heaviside(x,eps) + self.rho1*(1.0 - self.Appr_Heaviside(x,eps))
+        if(self.dim_choice == 'Dimensional'):
+            return self.rho2*self.Appr_Heaviside(x,eps) + self.rho1*(1.0 - self.Appr_Heaviside(x,eps))
+        elif(self.dim_choice == 'Non_Dimensional'):
+            return self.Appr_Heaviside(x,eps) + self.rho1_rho2*(1.0 - self.Appr_Heaviside(x,eps))
 
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return self.mu2*self.Appr_Heaviside(x,eps) + self.mu1*(1.0 - self.Appr_Heaviside(x,eps))
+        if(self.dim_choice == 'Dimensional'):
+            return self.mu2*self.Appr_Heaviside(x,eps) + self.mu1*(1.0 - self.Appr_Heaviside(x,eps))
+        elif(self.dim_choice == 'Non_Dimensional'):
+            return self.Appr_Heaviside(x,eps) + self.mu1_mu2*(1.0 - self.Appr_Heaviside(x,eps))
 
 
     """Set weak formulations"""
@@ -349,11 +369,19 @@ class BubbleMove(TwoPhaseFlows):
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
-                self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
-                                  self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                if(self.dim_choice == 'Dimensional'):
+                    self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                                      self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                elif(self.NS_weak_form == 'Non_Dimensional'):
+                    self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                                      self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
             elif(self.NS_sol_method == 'ICT'):
-                self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
-                                     self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                if(self.dim_choice == 'Dimensional'):
+                    self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
+                                         self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                elif(self.dim_choice == 'Non_Dimensional'):
+                    self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
+                                         self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
         except ValueError as e:
@@ -377,13 +405,13 @@ class BubbleMove(TwoPhaseFlows):
             #Assign vector to FE function
             self.levset.vector().set_local(self.tmp)
 
-            self.vtkfile_phi << (self.levset, self.t)
-            self.vtkfile_u << (self.u_old, self.t)
+            self.vtkfile_phi << (self.levset, self.t*self.t0)
+            self.vtkfile_u << (self.u_old, self.t*self.t0)
             if(self.LS_sol_method == 'Continuous'):
                 self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             elif(self.LS_sol_method == 'DG'):
                 self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Qcont))
-            self.vtkfile_rho << (self.rho_interp, self.t)
+            self.vtkfile_rho << (self.rho_interp, self.t*self.t0)
 
         #Compute benchamrk quantities
         if(self.reinit_method == 'Conservative'):
@@ -395,7 +423,7 @@ class BubbleMove(TwoPhaseFlows):
             Yc = assemble(Expression("x[1]", degree = 1)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
             Uc = assemble(inner(self.u_old,self.e1)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
             Vc = assemble(inner(self.u_old,self.e2)*(conditional(lt(self.phi_old, 0.5), 1.0, 0.0))*dx)/Vol
-            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc]
+            timeseries_vec = [self.t*self.t0,Vol,Chi,Xc,Yc,Uc,Vc]
         elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             Vol = assemble(conditional(lt(self.phi_old, 0.0), 1.0, 0.0)*dx)
             Pa = 2.0*sqrt(np.pi*Vol)
@@ -406,7 +434,7 @@ class BubbleMove(TwoPhaseFlows):
             Uc = assemble(inner(self.u_old,self.e1)*(conditional(lt(self.phi_old, 0.0), 1.0, 0.0))*dx)/Vol
             Vc = assemble(inner(self.u_old,self.e2)*(conditional(lt(self.phi_old, 0.0), 1.0, 0.0))*dx)/Vol
             L2_gradphi = sqrt(assemble(inner(grad(self.phi_old),grad(self.phi_old))*dx)/(self.base*self.height))
-            timeseries_vec = [self.t,Vol,Chi,Xc,Yc,Uc,Vc,L2_gradphi]
+            timeseries_vec = [self.t*self.t0,Vol,Chi,Xc,Yc,Uc,Vc,L2_gradphi]
 
         if(self.rank == 0):
             np.savetxt(self.timeseries, timeseries_vec)
@@ -445,7 +473,7 @@ class BubbleMove(TwoPhaseFlows):
         self.timeseries.close() #Close for safety in case some system fails to reach convergence
         self.t += self.dt
         while self.t <= self.t_end:
-            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t) + " s")
+            begin(int(LogLevel.INFO) + 1,"t = " + str(self.t*self.t0) + " s")
             self.n_iter += 1
 
             #Solve level-set
@@ -462,15 +490,16 @@ class BubbleMove(TwoPhaseFlows):
             if(reinit_iters != 0 and self.n_iter % reinit_iters == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
+                    if(self.reinit_method == 'Conservative'):
+                        self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
-                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute updated normal vector
                     end()
                 except Exception as e:
                     if(self.rank == 0):
                         print(str(e))
                         print("Aborting simulation...")
                     exit(1)
+            self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")

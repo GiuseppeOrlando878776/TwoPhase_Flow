@@ -49,7 +49,7 @@ class RayleighTaylor(TwoPhaseFlows):
 
         #Check correctness of data read
         if(self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or \
-           self.mu2 < DOLFIN_EPS or self.g < DOLFIN_EPS):
+           self.mu2 < DOLFIN_EPS or self.g < 0.0):
             raise ValueError("Invalid parameter in the configuration file (read a non positive value for some parameters)")
         if(self.dt > self.t_end):
             raise ValueError("Time-step greater than final time")
@@ -477,7 +477,7 @@ class RayleighTaylor(TwoPhaseFlows):
                         print(str(e))
                         print("Aborting simulation...")
                     exit(1)
-
+            
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
             self.switcher_NS_solve[self.NS_sol_method](*self.switcher_arguments_NS_solve[self.NS_sol_method])
