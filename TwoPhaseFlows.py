@@ -319,10 +319,16 @@ class TwoPhaseFlows():
             raise ValueError("phi_curr must be an instance of Function")
 
         #Declare weak formulation
-        self.a1_reinit = (phi/dt_reinit)*l*dx
+        self.a1_reinit = (phi/dt_reinit)*l*dx \
+                       #+ 1.0/beta_reinit*inner(jump(phi,self.n_mesh), jump(l,self.n_mesh))*dS \
+                       #+ 1.0/beta_reinit*phi*l*ds
         self.L1_reinit = (phi0/dt_reinit)*l*dx \
                        + signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx \
                        - beta_reinit*inner(grad(phi0), grad(l))*dx \
+                       + beta_reinit*inner(avg(grad(phi0)), jump(l,self.n_mesh))*dS \
+                       + beta_reinit*inner(grad(phi0),self.n_mesh)*l*ds \
+                       #+ beta_reinit*inner(avg(grad(l)), jump(phi0,self.n_mesh))*dS \
+                       #+ beta_reinit*inner(grad(l), self.n_mesh)*phi0*ds
 
         #Save the matrix (that will not change during computations) and declare vector
         self.A1_reinit = assemble(self.a1_reinit)

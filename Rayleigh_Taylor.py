@@ -203,14 +203,8 @@ class RayleighTaylor(TwoPhaseFlows):
             self.v = TestFunction(self.V)
             self.p = TrialFunction(self.P)
             self.q = TestFunction(self.P)
-        if(self.LS_sol_method == 'Continuous'):
-            self.phi = TrialFunction(self.Q)
-            self.l   = TestFunction(self.Q)
-        elif(self.LS_sol_method == 'DG'):
-            self.lev  = TrialFunction(self.Q)
-            self.dgl  = TestFunction(self.Q)
-            self.phi  = TrialFunction(self.Qcont)
-            self.l    = TestFunction(self.Qcont)
+        self.phi = TrialFunction(self.Q)
+        self.l   = TestFunction(self.Q)
 
         #Define functions to store solution
         self.u_curr   = Function(self.V)
@@ -219,24 +213,14 @@ class RayleighTaylor(TwoPhaseFlows):
         self.p_old    = Function(self.P)
         if(self.NS_sol_method == 'Standard'):
             self.w_curr = Function(self.W)
-        if(self.LS_sol_method == 'Continuous'):
-            self.phi_curr = Function(self.Q)
-            self.phi_old  = Function(self.Q)
-        elif(self.LS_sol_method == 'DG'):
-            self.phi_curr = Function(self.Qcont)
-            self.phi_old  = Function(self.Qcont)
-            self.levset_curr = Function(self.Q)
-            self.levset_old  = Function(self.Q)
+        self.phi_curr = Function(self.Q)
+        self.phi_old  = Function(self.Q)
 
         #Define useful functions for reinitialization
-        if(self.LS_sol_method == 'Continuous'):
-            self.phi0 = Function(self.Q)
-            self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
-                                                     #reinitialization and it is also useful for clearness
-        elif(self.LS_sol_method == 'DG'):
-            self.phi0 = Function(self.Qcont)
-            self.phi_intermediate = Function(self.Qcont) #This is fundamental in case on 'non-conservative'
-                                                         #reinitialization and it is also useful for clearness
+        self.phi0 = Function(self.Q)
+        self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
+                                                 #reinitialization and it is also useful for clearness
+
         #Define function and vector for saving purposes
         if(self.LS_sol_method == 'Continuous'):
             self.levset     = Function(self.Q)
@@ -247,7 +231,7 @@ class RayleighTaylor(TwoPhaseFlows):
 
         #Declare function for normal vector (in case of conservative level-set method)
         if(self.reinit_method == 'Conservative'):
-            self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+            self.Q2 = VectorFunctionSpace(self.mesh, "CG", max(1, self.deg_LS - 1))
             self.n = Function(self.Q2)
 
         #Parameters for reinitialization steps
@@ -311,11 +295,7 @@ class RayleighTaylor(TwoPhaseFlows):
                 f = Expression("tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))", A = self.height/2.0, degree = 8)
             else:
                 f = Expression("x[1] - A - 0.01*B*cos(2*pi*x[0])", A = self.height/2.0, B = self.height, degree = 8)
-            if(self.LS_sol_method == 'Continuous'):
-                self.phi_old.assign(interpolate(f,self.Q))
-            elif(self.LS_sol_method == 'DG'):
-                self.levset_old.assign(interpolate(f,self.Q))
-                self.phi_old.assign(interpolate(f,self.Qcont))
+            self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
             if(Interface_Perturbation_RT == 'Tanh'):
                 f = Expression("1.0/(1.0 + exp(-tanh((x[1] - A - 0.1*cos(2*pi*x[0]))/(0.01*sqrt(2.0)))/eps))", \
@@ -323,11 +303,7 @@ class RayleighTaylor(TwoPhaseFlows):
             else:
                 f = Expression("1.0/(1.0 + exp(-(x[1] - A - 0.01*B*cos(2*pi*x[0]))/eps))", \
                                 A = self.height/2.0, B = self.height, eps = self.eps, degree = 8)
-            if(self.LS_sol_method == 'Continuous'):
-                self.phi_old.assign(interpolate(f,self.Q))
-            elif(self.LS_sol_method == 'DG'):
-                self.levset_old.assign(interpolate(f,self.Q))
-                self.phi_old.assign(interpolate(f,self.Qcont))
+            self.phi_old.assign(interpolate(f,self.Q))
 
 
     """Assemble boundary condition"""
@@ -382,7 +358,7 @@ class RayleighTaylor(TwoPhaseFlows):
                 self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, \
                                   self.stab_method, self.switcher_parameter[self.stab_method])
             elif(self.LS_sol_method == 'DG'):
-                self.LS_weak_form_DG(self.lev, self.dgl, self.levset_old, self.u_old, self.DT, self.mesh)
+                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh)
 
             #Set variational problem for reinitialization
             self.switcher_reinit_varf[self.reinit_method](*self.switcher_arguments_reinit_varf[self.reinit_method])
@@ -406,9 +382,16 @@ class RayleighTaylor(TwoPhaseFlows):
     """Save the actual state for post-processing"""
     def plot_and_save(self):
         #Extract vector for FE function
-        self.phi_vec = self.phi_old.vector().get_local()
+        if(self.LS_sol_method == 'DG'):
+            self.phi_cont = project(self.phi_old, self.Qcont)
+            self.phi_vec = self.phi_cont.vector().get_local()
+        elif(self.LS_sol_method == 'Continuous'):
+            self.phi_vec = self.phi_old.vector().get_local()
         #Construct vector of ones inside the bubble
-        self.tmp = 1.0*(self.phi_vec < 0.0)
+        if(self.reinit_method == 'Conservative'):
+            self.tmp = 1.0*(self.phi_vec < 0.5)
+        elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+            self.tmp = 1.0*(self.phi_vec < 0.0)
         #Assign vector to FE function
         self.levset.vector().set_local(self.tmp)
 
@@ -456,12 +439,7 @@ class RayleighTaylor(TwoPhaseFlows):
 
             #Solve level-set
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
-            if(self.LS_sol_method == 'Continuous'):
-                self.solve_Levelset_system(self.phi_curr)
-            elif(self.LS_sol_method == 'DG'):
-                self.solve_Levelset_system(self.levset_curr)
-                self.phi_curr.assign(project(self.levset_curr, self.Qcont))
-                self.phi_old.assign(project(self.levset_old, self.Qcont))
+            self.solve_Levelset_system(self.phi_curr)
             end()
 
             #Solve Level-set reinit
@@ -477,7 +455,7 @@ class RayleighTaylor(TwoPhaseFlows):
                         print(str(e))
                         print("Aborting simulation...")
                     exit(1)
-            
+
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
             self.switcher_NS_solve[self.NS_sol_method](*self.switcher_arguments_NS_solve[self.NS_sol_method])
@@ -489,9 +467,7 @@ class RayleighTaylor(TwoPhaseFlows):
             self.u_old.assign(self.u_curr)
             self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
-            if(self.LS_sol_method == 'DG'):
-                self.levset_old.assign(self.levset_curr)
-
+        
             #Save and compute benchmark quantities
             if(self.n_iter % save_iters == 0):
                 begin(int(LogLevel.INFO) + 1,"Saving data")

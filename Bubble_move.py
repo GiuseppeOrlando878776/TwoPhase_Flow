@@ -167,7 +167,7 @@ class BubbleMove(TwoPhaseFlows):
         elif(self.LS_sol_method == 'DG'):
             self.Q      = FunctionSpace(self.mesh, "DG", self.deg_LS)
             self.Qcont  = FunctionSpace(self.mesh, "CG", self.deg_LS)
-        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+        self.Q2 = VectorFunctionSpace(self.mesh, "CG", max(1, self.deg_LS - 1))
 
         #Define trial and test functions
         if(self.NS_sol_method == 'Standard'):
@@ -178,14 +178,8 @@ class BubbleMove(TwoPhaseFlows):
             self.v = TestFunction(self.V)
             self.p = TrialFunction(self.P)
             self.q = TestFunction(self.P)
-        if(self.LS_sol_method == 'Continuous'):
-            self.phi = TrialFunction(self.Q)
-            self.l   = TestFunction(self.Q)
-        elif(self.LS_sol_method == 'DG'):
-            self.lev  = TrialFunction(self.Q)
-            self.dgl  = TestFunction(self.Q)
-            self.phi  = TrialFunction(self.Qcont)
-            self.l    = TestFunction(self.Qcont)
+        self.phi = TrialFunction(self.Q)
+        self.l   = TestFunction(self.Q)
 
         #Define functions to store solution
         self.u_curr   = Function(self.V)
@@ -194,27 +188,16 @@ class BubbleMove(TwoPhaseFlows):
         self.p_old    = Function(self.P)
         if(self.NS_sol_method == 'Standard'):
             self.w_curr = Function(self.W)
-        if(self.LS_sol_method == 'Continuous'):
-            self.phi_curr = Function(self.Q)
-            self.phi_old  = Function(self.Q)
-        elif(self.LS_sol_method == 'DG'):
-            self.phi_curr = Function(self.Qcont)
-            self.phi_old  = Function(self.Qcont)
-            self.levset_curr = Function(self.Q)
-            self.levset_old  = Function(self.Q)
+        self.phi_curr = Function(self.Q)
+        self.phi_old  = Function(self.Q)
 
         #Define function to store the normal
         self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
-        if(self.LS_sol_method == 'Continuous'):
-            self.phi0 = Function(self.Q)
-            self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
-                                                     #reinitialization and it is also useful for clearness
-        elif(self.LS_sol_method == 'DG'):
-            self.phi0 = Function(self.Qcont)
-            self.phi_intermediate = Function(self.Qcont) #This is fundamental in case on 'non-conservative'
-                                                         #reinitialization and it is also useful for clearness
+        self.phi0 = Function(self.Q)
+        self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
+                                                 #reinitialization and it is also useful for clearness
 
         #Define function and vector for plotting level-set and computing volume
         if(self.LS_sol_method == 'Continuous'):
@@ -232,8 +215,8 @@ class BubbleMove(TwoPhaseFlows):
                 raise  ValueError("Non-Positive value for the interface thickness")
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(np.minimum(0.0001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
-                                                                    #and so a very small step is needed
+            self.dt_reinit = Constant(np.minimum(0.00001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                     #and so a very small step is needed
 
             #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
@@ -289,19 +272,11 @@ class BubbleMove(TwoPhaseFlows):
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                             A = center[0], B = center[1], r = radius, degree = 2)
-            if(self.LS_sol_method == 'Continuous'):
-                self.phi_old.assign(interpolate(f,self.Q))
-            elif(self.LS_sol_method == 'DG'):
-                self.levset_old.assign(interpolate(f,self.Q))
-                self.phi_old.assign(interpolate(f,self.Qcont))
+            self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
             f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
                             A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
-            if(self.LS_sol_method == 'Continuous'):
-                self.phi_old.assign(interpolate(f,self.Q))
-            elif(self.LS_sol_method == 'DG'):
-                self.levset_old.assign(interpolate(f,self.Q))
-                self.phi_old.assign(interpolate(f,self.Qcont))
+            self.phi_old.assign(interpolate(f,self.Q))
 
 
     """Assemble boundary condition"""
@@ -362,7 +337,7 @@ class BubbleMove(TwoPhaseFlows):
                 self.LS_weak_form(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh, \
                                   self.stab_method, self.switcher_parameter[self.stab_method])
             elif(self.LS_sol_method == 'DG'):
-                self.LS_weak_form_DG(self.lev, self.dgl, self.levset_old, self.u_old, self.DT, self.mesh)
+                self.LS_weak_form_DG(self.phi, self.l, self.phi_old, self.u_old, self.DT, self.mesh)
 
             #Set variational problem for reinitialization
             self.switcher_reinit_varf[self.reinit_method](*self.switcher_arguments_reinit_varf[self.reinit_method])
@@ -396,7 +371,11 @@ class BubbleMove(TwoPhaseFlows):
         #Save the actual state for visualization
         if(self.n_iter % self.save_iters == 0):
             #Extract vector for FE function
-            self.phi_vec = self.phi_old.vector().get_local()
+            if(self.LS_sol_method == 'DG'):
+                self.phi_cont = project(self.phi_old, self.Qcont)
+                self.phi_vec = self.phi_cont.vector().get_local()
+            elif(self.LS_sol_method == 'Continuous'):
+                self.phi_vec = self.phi_old.vector().get_local()
             #Construct vector of ones inside the bubble
             if(self.reinit_method == 'Conservative'):
                 self.tmp = 1.0*(self.phi_vec < 0.5)
@@ -478,12 +457,7 @@ class BubbleMove(TwoPhaseFlows):
 
             #Solve level-set
             begin(int(LogLevel.INFO) + 1,"Solving Level-set")
-            if(self.LS_sol_method == 'Continuous'):
-                self.solve_Levelset_system(self.phi_curr)
-            elif(self.LS_sol_method == 'DG'):
-                self.solve_Levelset_system(self.levset_curr)
-                self.phi_curr.assign(project(self.levset_curr, self.Qcont))
-                self.phi_old.assign(project(self.levset_old, self.Qcont))
+            self.solve_Levelset_system(self.phi_curr)
             end()
 
             #Solve Level-set reinit
@@ -499,7 +473,8 @@ class BubbleMove(TwoPhaseFlows):
                         print(str(e))
                         print("Aborting simulation...")
                     exit(1)
-            self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
+            if(self.sigma > DOLFIN_EPS):
+                self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
@@ -512,8 +487,6 @@ class BubbleMove(TwoPhaseFlows):
             self.u_old.assign(self.u_curr)
             self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
-            if(self.LS_sol_method == 'DG'):
-                self.levset_old.assign(self.levset_curr)
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
@@ -528,7 +501,11 @@ class BubbleMove(TwoPhaseFlows):
 
         #Save the final state
         if(self.n_iter % self.save_iters != 0):
-            self.phi_vec = self.phi_old.vector().get_local()
+            if(self.LS_sol_method == 'DG'):
+                self.phi_cont = project(self.phi_old, self.Qcont)
+                self.phi_vec = self.phi_cont.vector().get_local()
+            elif(self.LS_sol_method == 'Continuous'):
+                self.phi_vec = self.phi_old.vector().get_local()
             if(self.reinit_method == 'Conservative'):
                 self.tmp = 1.0*(self.phi_vec < 0.5)
             elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
