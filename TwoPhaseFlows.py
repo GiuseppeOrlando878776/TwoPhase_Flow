@@ -320,13 +320,16 @@ class TwoPhaseFlows():
 
         #Declare weak formulation
         self.a1_reinit = (phi/dt_reinit)*l*dx \
+                       + beta_reinit*inner(grad(phi), grad(l))*dx \
+                       - beta_reinit*inner(avg(grad(phi)), jump(l,self.n_mesh))*dS \
+                       - beta_reinit*inner(grad(phi),self.n_mesh)*l*ds \
                        #+ 1.0/beta_reinit*inner(jump(phi,self.n_mesh), jump(l,self.n_mesh))*dS \
                        #+ 1.0/beta_reinit*phi*l*ds
         self.L1_reinit = (phi0/dt_reinit)*l*dx \
                        + signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx \
-                       - beta_reinit*inner(grad(phi0), grad(l))*dx \
-                       + beta_reinit*inner(avg(grad(phi0)), jump(l,self.n_mesh))*dS \
-                       + beta_reinit*inner(grad(phi0),self.n_mesh)*l*ds \
+                       #- beta_reinit*inner(grad(phi0), grad(l))*dx \
+                       #+ beta_reinit*inner(avg(grad(phi0)), jump(l,self.n_mesh))*dS \
+                       #+ beta_reinit*inner(grad(phi0),self.n_mesh)*l*ds \
                        #+ beta_reinit*inner(avg(grad(l)), jump(phi0,self.n_mesh))*dS \
                        #+ beta_reinit*inner(grad(l), self.n_mesh)*phi0*ds
 
