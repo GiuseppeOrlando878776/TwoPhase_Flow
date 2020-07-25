@@ -350,8 +350,30 @@ class TwoPhaseFlows():
 
         #Save variational formulation
         self.F1_reinit = (phi_intermediate - phi0)/dt_reinit*l*dx \
-                       - phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
+                       + phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx
+
+
+    """Weak form conservative reinitialization (DG version)"""
+    def CLSM_weak_form_DG(self, phi_intermediate, l, phi0, n_gamma, dt_reinit, eps_reinit):
+        #Check correctness of types
+        if(not isinstance(phi_intermediate, Function)):
+            raise ValueError("phi_intermediate must be an instance of Function")
+        if(not isinstance(phi0, Function)):
+            raise ValueError("phi0 must be an instance of Function")
+        if(not isinstance(n_gamma, Function)):
+            raise ValueError("n_gamma must be an instance of Function")
+
+        #Save variational formulation
+        self.F1_reinit = (phi_intermediate - phi0)/dt_reinit*l*dx \
+                       + phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
+                       + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx \
+                       - eps_reinit*inner(avg(inner(grad(phi_intermediate), n_gamma)*n_gamma), jump(l, self.n_mesh))*dS \
+                       - inner(avg(phi_intermediate*(1.0 - phi_intermediate)*n_gamma), jump(l, self.n_mesh))*dS \
+                       #- phi_intermediate*(1.0 - phi_intermediate)*inner(n_gamma, self.n_mesh)*l*ds
+                       #- eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(n_gamma, self.n_mesh)*l*ds \
+                       #- jump(phi_intermediate*(1.0 - phi_intermediate)*n_gamma, self.n_mesh)*avg(l)*dS \
+                       #- inner(avg(phi_intermediate*(1.0 - phi_intermediate)*n_gamma), jump(l, self.n_mesh))*dS \
 
 
     """Build and solve the system for Level set transport"""
@@ -402,7 +424,7 @@ class TwoPhaseFlows():
             #Solve the system
             solve(self.F1_reinit == 0, phi_intermediate, \
                   solver_parameters={"newton_solver": {"linear_solver": self.solver_recon, "preconditioner": self.precon_recon,\
-                                     "maximum_iterations": 20, "absolute_tolerance": 1e-8, "relative_tolerance": 1e-6}}, \
+                                     "maximum_iterations": 100, "absolute_tolerance": 1e-8, "relative_tolerance": 1e-6}}, \
                   form_compiler_parameters={"optimize": True})
 
             #Check if convergence has been reached

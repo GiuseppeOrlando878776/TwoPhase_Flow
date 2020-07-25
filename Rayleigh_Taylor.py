@@ -267,7 +267,10 @@ class RayleighTaylor(TwoPhaseFlows):
 
             #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
-            self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
+            if(self.LS_sol_method == 'Continuous'):
+                self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
+            elif(self.LS_sol_method == 'DG'):
+                self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form_DG}
             self.switcher_arguments_reinit_varf = {'Conservative': \
                                                    (self.phi_intermediate, self.l, self.phi0, self.n, self.dt_reinit, self.eps)}
 
@@ -467,7 +470,7 @@ class RayleighTaylor(TwoPhaseFlows):
             self.u_old.assign(self.u_curr)
             self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
-        
+
             #Save and compute benchmark quantities
             if(self.n_iter % save_iters == 0):
                 begin(int(LogLevel.INFO) + 1,"Saving data")

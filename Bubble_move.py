@@ -235,12 +235,15 @@ class BubbleMove(TwoPhaseFlows):
                                                      self.max_subiters, self.tol_recon)}
         elif(self.reinit_method == 'Conservative'):
             hmin = MPI.min(self.comm, self.mesh.hmin())
-            self.dt_reinit = Constant(0.5*hmin**(1.1))
+            self.dt_reinit = Constant(0.00005*hmin**(1.1))
             self.eps = Constant(0.5*hmin**(0.9))
 
             #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
-            self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
+            if(self.LS_sol_method == 'Continuous'):
+                self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
+            elif(self.LS_sol_method == 'DG'):
+                self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form_DG}
             self.switcher_arguments_reinit_varf = {'Conservative': \
                                                    (self.phi_intermediate, self.l, self.phi0, self.n, self.dt_reinit, self.eps)}
 
