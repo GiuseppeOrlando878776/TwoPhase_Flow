@@ -368,8 +368,12 @@ class TwoPhaseFlows():
         self.F1_reinit = (phi_intermediate - phi0)/dt_reinit*l*dx \
                        + phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx \
-                       - eps_reinit*inner(avg(inner(grad(phi_intermediate), n_gamma)*n_gamma), jump(l, self.n_mesh))*dS \
-                       - inner(avg(phi_intermediate*(1.0 - phi_intermediate)*n_gamma), jump(l, self.n_mesh))*dS \
+                       - avg(phi_intermediate*(1.0 - phi_intermediate))*inner(n_gamma, jump(l, self.n_mesh))*dS \
+                       + 5.0/2.0*inner(jump(phi_intermediate, self.n_mesh), jump(l, self.n_mesh))*dS \
+                       - eps_reinit*inner(avg(grad(phi_intermediate)), n_gamma)*inner(n_gamma, jump(l, self.n_mesh))*dS \
+                       #- inner(jump(avg(phi_intermediate*(1.0 - phi_intermediate)), self.n_mesh), n_gamma)*avg(l)*dS \
+                       #+ 5.0/2.0*jump(jump(phi_intermediate, self.n_mesh),self.n_mesh)*avg(l)*dS \
+                       #- eps_reinit*jump(avg(grad(phi_intermediate)), self.n_mesh)*avg(l)*dS \
                        #- phi_intermediate*(1.0 - phi_intermediate)*inner(n_gamma, self.n_mesh)*l*ds
                        #- eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(n_gamma, self.n_mesh)*l*ds \
                        #- jump(phi_intermediate*(1.0 - phi_intermediate)*n_gamma, self.n_mesh)*avg(l)*dS \
