@@ -15,9 +15,9 @@ class TwoPhaseFlows():
         #Save solvers and preconditioners settings; in this way we prepare ourselves
         #in case the option to pass it through configuration file will be added in a future version
         self.solver_Levset = "gmres"
-        self.precon_Levset = "default"
+        self.precon_Levset = "ilu"
         self.solver_recon = "gmres"
-        self.precon_recon = "default"
+        self.precon_recon = "ilu"
         self.solver_Standard_NS = "mumps"
         self.precon_Standard_NS = "default"
         self.solver_ICT_1 = "gmres"
@@ -369,7 +369,8 @@ class TwoPhaseFlows():
                        + phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx \
                        - avg(phi_intermediate*(1.0 - phi_intermediate))*inner(n_gamma, jump(l, self.n_mesh))*dS \
-                       + 5.0/2.0*inner(jump(phi_intermediate, self.n_mesh), jump(l, self.n_mesh))*dS \
+                       + 0.5*(1.0 + 2.0*ufl.Max(abs(phi_intermediate('-')), abs(phi_intermediate('+'))))*\
+                         inner(jump(phi_intermediate, self.n_mesh), jump(l, self.n_mesh))*dS \
                        - eps_reinit*inner(avg(grad(phi_intermediate)), n_gamma)*inner(n_gamma, jump(l, self.n_mesh))*dS \
                        #- inner(jump(avg(phi_intermediate*(1.0 - phi_intermediate)), self.n_mesh), n_gamma)*avg(l)*dS \
                        #+ 5.0/2.0*jump(jump(phi_intermediate, self.n_mesh),self.n_mesh)*avg(l)*dS \

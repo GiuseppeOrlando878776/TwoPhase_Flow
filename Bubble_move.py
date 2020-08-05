@@ -190,6 +190,12 @@ class BubbleMove(TwoPhaseFlows):
             self.w_curr = Function(self.W)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
+        if(self.LS_sol_method == 'Continuous'):
+            self.phi_curr_cont = Function(self.Q)
+            self.phi_old_cont  = Function(self.Q)
+        elif(self.LS_sol_method == 'DG'):
+            self.phi_curr_cont = Function(self.Qcont)
+            self.phi_old_cont  = Function(self.Qcont)
 
         #Define function to store the normal
         self.n = Function(self.Q2)
@@ -349,17 +355,17 @@ class BubbleMove(TwoPhaseFlows):
             if(self.NS_sol_method == 'Standard'):
                 if(self.dim_choice == 'Dimensional'):
                     self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
-                                      self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
-                elif(self.NS_weak_form == 'Non_Dimensional'):
+                                      self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                elif(self.dim_choice == 'Non_Dimensional'):
                     self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
-                                      self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
+                                      self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
             elif(self.NS_sol_method == 'ICT'):
                 if(self.dim_choice == 'Dimensional'):
                     self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
-                                         self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                                         self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
                 elif(self.dim_choice == 'Non_Dimensional'):
                     self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
-                                         self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
+                                         self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
         except ValueError as e:
@@ -374,11 +380,7 @@ class BubbleMove(TwoPhaseFlows):
         #Save the actual state for visualization
         if(self.n_iter % self.save_iters == 0):
             #Extract vector for FE function
-            if(self.LS_sol_method == 'DG'):
-                self.phi_cont = project(self.phi_old, self.Qcont)
-                self.phi_vec = self.phi_cont.vector().get_local()
-            elif(self.LS_sol_method == 'Continuous'):
-                self.phi_vec = self.phi_old.vector().get_local()
+            self.phi_vec = self.phi_old_cont.vector().get_local()
             #Construct vector of ones inside the bubble
             if(self.reinit_method == 'Conservative'):
                 self.tmp = 1.0*(self.phi_vec < 0.5)
@@ -481,6 +483,12 @@ class BubbleMove(TwoPhaseFlows):
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
+            if(self.LS_sol_method == 'Continuous'):
+                self.phi_curr_cont.assign(self.phi_curr)
+                self.phi_old_cont.assign(self.phi_old)
+            elif(self.LS_sol_method == 'DG'):
+                self.phi_curr_cont.assign(project(self.phi_curr, self.Qcont))
+                self.phi_old_cont.assign(project(self.phi_old, self.Qcont))
             self.switcher_NS_solve[self.NS_sol_method](*self.switcher_arguments_NS_solve[self.NS_sol_method])
             if(self.NS_sol_method == 'Standard'):
                 (self.u_curr, self.p_curr) = self.w_curr.split(True)
@@ -490,6 +498,7 @@ class BubbleMove(TwoPhaseFlows):
             self.u_old.assign(self.u_curr)
             self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
+            self.phi_old_cont.assign(self.phi_curr_cont)
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
