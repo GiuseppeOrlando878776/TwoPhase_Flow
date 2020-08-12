@@ -15,9 +15,9 @@ class TwoPhaseFlows():
         #Save solvers and preconditioners settings; in this way we prepare ourselves
         #in case the option to pass it through configuration file will be added in a future version
         self.solver_Levset = "gmres"
-        self.precon_Levset = "ilu"
+        self.precon_Levset = "default"
         self.solver_recon = "gmres"
-        self.precon_recon = "ilu"
+        self.precon_recon = "default"
         self.solver_Standard_NS = "mumps"
         self.precon_Standard_NS = "default"
         self.solver_ICT_1 = "gmres"
@@ -281,6 +281,7 @@ class TwoPhaseFlows():
         F1 = (phi - phi_old)/dt*l*dx - phi*inner(u_old, grad(l))*dx \
            + avg(phi)*inner(u_old, jump(l,self.n_mesh))*dS \
            + 0.5*abs(inner(u_old, self.n_mesh('+')))*inner(jump(phi,self.n_mesh), jump(l,self.n_mesh))*dS \
+           + inner(u_old,self.n_mesh)*phi*l*ds \
 
         #Save corresponding weak forms
         self.a1 = lhs(F1)
@@ -355,7 +356,7 @@ class TwoPhaseFlows():
 
 
     """Weak form conservative reinitialization (DG version)"""
-    def CLSM_weak_form_DG(self, phi_intermediate, l, phi0, n_gamma, dt_reinit, eps_reinit):
+    def CLSM_weak_form_DG(self, phi_intermediate, l, phi0, n_gamma, dt_reinit, eps_reinit, xi = 1.0e-5):
         #Check correctness of types
         if(not isinstance(phi_intermediate, Function)):
             raise ValueError("phi_intermediate must be an instance of Function")
@@ -366,19 +367,17 @@ class TwoPhaseFlows():
 
         #Save variational formulation
         self.F1_reinit = (phi_intermediate - phi0)/dt_reinit*l*dx \
-                       + phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
-                       + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx \
-                       - avg(phi_intermediate*(1.0 - phi_intermediate))*inner(n_gamma, jump(l, self.n_mesh))*dS \
+                       + phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*\
+                         conditional(gt(phi0,-xi),1.0,0.0)*conditional(lt(phi0,1.0 + xi),1.0,0.0)*dx \
+                       + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*\
+                         conditional(gt(phi0,-xi),1.0,0.0)*conditional(lt(phi0,1.0 + xi),1.0,0.0)*dx \
+                       - avg(phi_intermediate*(1.0 - phi_intermediate))*inner(n_gamma, jump(l, self.n_mesh))*\
+                         conditional(gt(ufl.Min(phi0('+'),phi0('-')),-xi),1.0,0.0)*conditional(lt(ufl.Max(phi0('+'),phi0('-')),1.0 + xi),1.0,0.0)*dS \
                        + 0.5*(1.0 + 2.0*ufl.Max(abs(phi_intermediate('-')), abs(phi_intermediate('+'))))*\
-                         inner(jump(phi_intermediate, self.n_mesh), jump(l, self.n_mesh))*dS \
-                       - eps_reinit*inner(avg(grad(phi_intermediate)), n_gamma)*inner(n_gamma, jump(l, self.n_mesh))*dS \
-                       #- inner(jump(avg(phi_intermediate*(1.0 - phi_intermediate)), self.n_mesh), n_gamma)*avg(l)*dS \
-                       #+ 5.0/2.0*jump(jump(phi_intermediate, self.n_mesh),self.n_mesh)*avg(l)*dS \
-                       #- eps_reinit*jump(avg(grad(phi_intermediate)), self.n_mesh)*avg(l)*dS \
-                       #- phi_intermediate*(1.0 - phi_intermediate)*inner(n_gamma, self.n_mesh)*l*ds
-                       #- eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(n_gamma, self.n_mesh)*l*ds \
-                       #- jump(phi_intermediate*(1.0 - phi_intermediate)*n_gamma, self.n_mesh)*avg(l)*dS \
-                       #- inner(avg(phi_intermediate*(1.0 - phi_intermediate)*n_gamma), jump(l, self.n_mesh))*dS \
+                         inner(jump(phi_intermediate, self.n_mesh), jump(l, self.n_mesh))*\
+                         conditional(gt(ufl.Min(phi0('+'),phi0('-')),-xi),1.0,0.0)*conditional(lt(ufl.Max(phi0('+'),phi0('-')),1.0 + xi),1.0,0.0)*dS \
+                       - eps_reinit*inner(avg(grad(phi_intermediate)), n_gamma)*inner(n_gamma, jump(l, self.n_mesh))*\
+                         conditional(gt(ufl.Min(phi0('+'),phi0('-')),-xi),1.0,0.0)*conditional(lt(ufl.Max(phi0('+'),phi0('-')),1.0 + xi),1.0,0.0)*dS \
 
 
     """Build and solve the system for Level set transport"""
