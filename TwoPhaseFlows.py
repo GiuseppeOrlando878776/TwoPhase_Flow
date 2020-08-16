@@ -356,7 +356,7 @@ class TwoPhaseFlows():
 
 
     """Weak form conservative reinitialization (DG version)"""
-    def CLSM_weak_form_DG(self, phi_intermediate, l, phi0, n_gamma, dt_reinit, eps_reinit):
+    def CLSM_weak_form_DG(self, phi_intermediate, l, phi0, n_gamma, dt_reinit, eps_reinit, xi = 1.0e-5):
         #Check correctness of types
         if(not isinstance(phi_intermediate, Function)):
             raise ValueError("phi_intermediate must be an instance of Function")
@@ -367,25 +367,26 @@ class TwoPhaseFlows():
 
         #Save variational formulation
         self.F1_reinit = (phi_intermediate - phi0)/dt_reinit*l*dx \
-                       - phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
-                       + avg(phi_intermediate*(1.0 - phi_intermediate))*inner(n_gamma, jump(l, self.n_mesh))*dS \
-                       - 0.5*(1.0 + 2.0*ufl.Max(abs(phi_intermediate('+')),abs(phi_intermediate('-'))))*\
-                         inner(jump(phi_intermediate, self.n_mesh), jump(l, self.n_mesh))*dS \
+                       - phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*\
+                         conditional(gt(phi_intermediate, -xi), 1.0, 0.0)*conditional(lt(phi_intermediate, 1.0 + xi), 1.0, 0.0)*dx \
+                       + avg(phi_intermediate*(1.0 - phi_intermediate)*\
+                             conditional(gt(phi_intermediate, -xi), 1.0, 0.0)*conditional(lt(phi_intermediate, 1.0 + xi), 1.0, 0.0))*\
+                         inner(n_gamma, jump(l, self.n_mesh))*dS \
+                       - (0.5 + avg(abs(phi_intermediate)))*inner(jump(phi_intermediate, self.n_mesh), jump(l, self.n_mesh))*dS \
+                       - inner(jump(phi_intermediate, self.n_mesh), jump(abs(phi_intermediate), self.n_mesh))*avg(l)*dS \
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx \
                        - eps_reinit*inner(avg(grad(phi_intermediate)), n_gamma)*inner(n_gamma, jump(l, self.n_mesh))*dS \
+                       - eps_reinit*jump(grad(phi_intermediate), self.n_mesh)*avg(l)*dS \
 
 
     """Build and solve the system for Level set transport"""
-    def solve_Levelset_system(self, phi_curr, xi = 1.0e-5):
+    def solve_Levelset_system(self, phi_curr):
         # Assemble matrix and right-hand side
         assemble(self.a1, tensor = self.A1)
         assemble(self.L1, tensor = self.b1)
 
         #Solve the level-set system
         solve(self.A1, phi_curr.vector(), self.b1, self.solver_Levset, self.precon_Levset)
-        tmp = phi_curr.vector().get_local()
-        np.clip(tmp, -xi, 1.0 + xi)
-        phi_curr.vector().set_local(tmp)
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
@@ -417,7 +418,7 @@ class TwoPhaseFlows():
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
-    def C_Levelset_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_subiters = 10, tol = 1.0e-4, xi = 1.0e-5):
+    def C_Levelset_reinit(self, phi_curr, phi_intermediate, phi0, dt_reinit, n_subiters = 10, tol = 1.0e-4):
         #Assign the current solution
         phi0.assign(phi_curr)
 
@@ -436,9 +437,6 @@ class TwoPhaseFlows():
                 break
 
             #Prepare for next iteration
-            tmp = phi_intermediate.vector().get_local()
-            np.clip(tmp, -xi, 1.0 + xi)
-            phi_intermediate.vector().set_local(tmp)
             phi0.assign(phi_intermediate)
 
         #Assign the reinitialized level-set to the current solution
