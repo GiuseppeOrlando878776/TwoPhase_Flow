@@ -367,13 +367,9 @@ class TwoPhaseFlows():
 
         #Save variational formulation
         self.F1_reinit = (phi_intermediate - phi0)/dt_reinit*l*dx \
-                       - phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*\
-                         conditional(gt(phi_intermediate, -xi), 1.0, 0.0)*conditional(lt(phi_intermediate, 1.0 + xi), 1.0, 0.0)*dx \
-                       + avg(phi_intermediate*(1.0 - phi_intermediate)*\
-                             conditional(gt(phi_intermediate, -xi), 1.0, 0.0)*conditional(lt(phi_intermediate, 1.0 + xi), 1.0, 0.0))*\
-                         inner(n_gamma, jump(l, self.n_mesh))*dS \
-                       + jump(phi_intermediate*(1.0 - phi_intermediate)*n_gamma*\
-                              conditional(gt(phi_intermediate, -xi), 1.0, 0.0)*conditional(lt(phi_intermediate, 1.0 + xi), 1.0, 0.0), self.n_mesh)*\
+                       - phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
+                       + avg(phi_intermediate*(1.0 - phi_intermediate))*inner(n_gamma, jump(l, self.n_mesh))*dS \
+                       + inner(n_gamma, jump(phi_intermediate*(1.0 - phi_intermediate), self.n_mesh))*\
                          inner(jump(ufl.sign((1.0 - 2.0*phi_intermediate)*inner(n_gamma, self.n_mesh)), self.n_mesh), jump(l, self.n_mesh))*dS \
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx \
                        - eps_reinit*inner(avg(grad(phi_intermediate)), n_gamma)*inner(n_gamma, jump(l, self.n_mesh))*dS \
@@ -387,9 +383,9 @@ class TwoPhaseFlows():
 
         #Solve the level-set system
         solve(self.A1, phi_curr.vector(), self.b1, self.solver_Levset, self.precon_Levset)
-        #tmp = phi_curr.vector().get_local()
-        #np.clip(tmp, -xi, 1.0 + xi)
-        #phi_curr.vector().set_local(tmp)
+        tmp = phi_curr.vector().get_local()
+        np.clip(tmp, -xi, 1.0 + xi)
+        phi_curr.vector().set_local(tmp)
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
@@ -440,9 +436,9 @@ class TwoPhaseFlows():
                 break
 
             #Prepare for next iteration
-            #tmp = phi_intermediate.vector().get_local()
-            #np.clip(tmp, -xi, 1.0 + xi)
-            #phi_intermediate.vector().set_local(tmp)
+            tmp = phi_intermediate.vector().get_local()
+            np.clip(tmp, -xi, 1.0 + xi)
+            phi_intermediate.vector().set_local(tmp)
             phi0.assign(phi_intermediate)
 
         #Assign the reinitialized level-set to the current solution
