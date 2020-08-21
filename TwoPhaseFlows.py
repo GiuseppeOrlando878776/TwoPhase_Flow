@@ -25,6 +25,8 @@ class TwoPhaseFlows():
         self.precon_ICT_2 = "default"
         self.solver_ICT_3 = "gmres"
         self.precon_ICT_3 = "default"
+        self.solver_Curv = "gmres"
+        self.precon_Curv = "default"
 
         #Declare useful constant vectors
         self.e1 = Constant((1.0, 0.0))
@@ -297,9 +299,27 @@ class TwoPhaseFlows():
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx
 
 
-    """Build and solve the system for Level set transport"""
+    """Curvature weak formulation"""
+    def Curvature_weak_form(self, H_curr, z, H_old, u_curr, n_gamma, dt):
+        #Check the correctness of type
+        if(not isinstance(H_curr, Function)):
+            raise ValueError("H_curr must be an instance of Function")
+        if(not isinstance(H_old, Function)):
+            raise ValueError("H_old must be an instance of Function")
+        if(not isinstance(u_curr, Function)):
+            raise ValueError("u_curr must be an instance of Function")
+        if(not isinstance(n_gamma, Function)):
+            raise ValueError("u_old must be an instance of Function")
+
+        #Declare weak formulation
+        self.F3 = ((H_curr - H_old)/dt + inner(u_curr, grad(H_curr)) - H_curr*H_curr*inner(u_curr, n_gamma))*z*dx \
+                + inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
+                - inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx
+
+
+    """Build and solve the system for Level-set transport"""
     def solve_Levelset_system(self, phi_curr):
-        # Assemble matrix and right-hand side
+        #Assemble matrix and right-hand side
         assemble(self.a1, tensor = self.A1)
         assemble(self.L1, tensor = self.b1)
 
@@ -363,12 +383,12 @@ class TwoPhaseFlows():
 
     """Build and solve the system for Navier-Stokes part using Standard method"""
     def solve_Standard_NS_system(self, bcs, w_curr):
-        # Assemble matrices and right-hand sides
+        #Assemble matrices and right-hand sides
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
 
-        # Apply boundary conditions
-        for bc in self.bcs:
+        #Apply boundary conditions
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
@@ -383,7 +403,7 @@ class TwoPhaseFlows():
         assemble(self.L2, tensor = self.b2)
 
         #Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
@@ -398,3 +418,11 @@ class TwoPhaseFlows():
         #Assemble and solve the third system
         assemble(self.L2_tris, tensor = self.b2_tris)
         solve(self.A2_tris, u_curr.vector(), self.b2_tris, self.solver_ICT_3, self.precon_ICT_3)
+
+
+    """Build and solve the system for Curvature"""
+    def solve_Curvature_system(self, H_curr, bcs):
+        solve(self.F3 == 0, H_curr, bcs = bcs, \
+              solver_parameters={"newton_solver": {"linear_solver": self.solver_Curv, "preconditioner": self.precon_Curv,\
+                                 "maximum_iterations": 20, "absolute_tolerance": 1e-8, "relative_tolerance": 1e-6}}, \
+              form_compiler_parameters={"optimize": True})

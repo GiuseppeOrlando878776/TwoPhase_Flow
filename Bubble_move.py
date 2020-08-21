@@ -139,6 +139,7 @@ class BubbleMove(TwoPhaseFlows):
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+        self.Qcurv = FunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         if(self.NS_sol_method == 'Standard'):
@@ -151,6 +152,7 @@ class BubbleMove(TwoPhaseFlows):
             self.q = TestFunction(self.P)
         self.phi = TrialFunction(self.Q)
         self.l   = TestFunction(self.Q)
+        self.z   = TestFunction(self.Qcurv)
 
         #Define functions to store solution
         self.u_curr   = Function(self.V)
@@ -161,6 +163,8 @@ class BubbleMove(TwoPhaseFlows):
             self.w_curr = Function(self.W)
         self.phi_curr = Function(self.Q)
         self.phi_old  = Function(self.Q)
+        self.H_curr   = Function(self.Qcurv)
+        self.H_old    = Function(self.Qcurv)
 
         #Define function to store the normal
         self.n = Function(self.Q2)
@@ -172,6 +176,7 @@ class BubbleMove(TwoPhaseFlows):
 
         #Define function and vector for plotting level-set and computing volume
         self.rho_interp = Function(self.Q)
+        self.lev_set    = Function(self.Q)
 
         #Parameters for reinitialization steps
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
@@ -232,14 +237,21 @@ class BubbleMove(TwoPhaseFlows):
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)), self.V))
         self.p_old.assign(interpolate(Constant(0.0), self.P))
+        f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
+                        A = center[0], B = center[1], r = radius, degree = 2)
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-            f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
-                            A = center[0], B = center[1], r = radius, degree = 2)
             self.phi_old.assign(interpolate(f,self.Q))
+            self.n.assign(project(grad(self.phi_old)/mgrad(self.phi_old), self.Q2))
+            self.H_old.assign(project(div(grad(self.phi_old)/mgrad(self.phi_old)), self.Qcurv))
         elif(self.reinit_method == 'Conservative'):
-            f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
-                            A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
-            self.phi_old.assign(interpolate(f, self.Q))
+            fcons = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
+                                A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
+            self.phi_old.assign(interpolate(fcons, self.Q))
+            tmp = interpolate(f,self.Q)
+            self.n.assign(project(grad(tmp)/mgrad(tmp), self.Q2))
+            self.H_old.assign(project(div(grad(tmp)/mgrad(tmp)), self.Qcurv))
+        #tmp = Expression("1.0/sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B))", A = center[0], B = center[1], degree = 2)
+        #self.H_old.assign(interpolate(tmp, self.Qcurv))
 
 
     """Assemble boundary condition"""
@@ -305,6 +317,9 @@ class BubbleMove(TwoPhaseFlows):
                                      self.phi_curr, self.phi_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
+
+            #Set variational problem for curvature
+            self.Curvature_weak_form(self.H_curr, self.z, self.H_old, self.u_curr, self.n, self.DT)
         except ValueError as e:
             if(self.rank == 0):
                 print(str(e))
@@ -316,9 +331,22 @@ class BubbleMove(TwoPhaseFlows):
     def plot_and_volume(self):
         #Save the actual state for visualization
         if(self.n_iter % self.save_iters == 0):
+            #Extract vector for FE function
+            self.phi_vec = self.phi_old.vector().get_local()
+            #Construct vector of ones inside the bubble
+            if(self.reinit_method == 'Conservative'):
+                self.tmp = 1.0*(self.phi_vec < 0.5)
+            elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+                self.tmp = 1.0*(self.phi_vec < 0.0)
+            #Assign vector to FE function
+            self.lev_set.vector().set_local(self.tmp)
+
+            self.vtkfile_phi << (self.lev_set, self.t)
             self.vtkfile_u << (self.u_old, self.t)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
+            self.vtkfile_Hev << (self.H_old, self.t)
+            self.vtkfile_Hcomp << (project(div(self.n), self.Qcurv), self.t)
 
         #Compute benchamrk quantities
         if(self.reinit_method == 'Conservative'):
@@ -368,8 +396,11 @@ class BubbleMove(TwoPhaseFlows):
         reinit_iters = self.Param["Reinitialization_Frequency"]
 
         #File for plotting
+        self.vtkfile_phi = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/phi.pvd')
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
+        self.vtkfile_Hev = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/Hev.pvd')
+        self.vtkfile_Hcomp = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/Hcomp.pvd')
 
         #File for benchamrk comparisons
         self.timeseries = open(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/benchmark_series.dat','wb')
@@ -388,7 +419,7 @@ class BubbleMove(TwoPhaseFlows):
             end()
 
             #Solve Level-set reinit
-            if(self.n_iter % reinit_iters == 0):
+            if(reinit_iters != 0 and self.n_iter % reinit_iters == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                     if(self.reinit_method == 'Conservative'):
@@ -400,8 +431,7 @@ class BubbleMove(TwoPhaseFlows):
                         print(str(e))
                         print("Aborting simulation...")
                     exit(1)
-            if(self.sigma > DOLFIN_EPS):
-                self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
+            self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
@@ -410,10 +440,17 @@ class BubbleMove(TwoPhaseFlows):
                 (self.u_curr, self.p_curr) = self.w_curr.split(True)
             end()
 
+            #Solve curvature
+            begin(int(LogLevel.INFO) + 1,"Solving Curvature")
+            self.solve_Curvature_system(self.H_curr, [DirichletBC(self.Qcurv, Constant(0.0), NoSlip_Boundary(self.height)), \
+                                                      DirichletBC(self.Qcurv, Constant(0.0), FreeSlip_Boundary(self.base))])
+            end()
+
             #Prepare to next step assign previous-step solution
             self.u_old.assign(self.u_curr)
             self.p_old.assign(self.p_curr)
             self.phi_old.assign(self.phi_curr)
+            self.H_old.assign(self.H_curr)
 
             #Save and compute benchmark quantities
             begin(int(LogLevel.INFO) + 1,"Computing benchmark quantities")
@@ -431,3 +468,5 @@ class BubbleMove(TwoPhaseFlows):
             self.vtkfile_u << (self.u_old, self.t)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
+            self.vtkfile_Hev << (self.H_old, self.t)
+            self.vtkfile_Hcomp << (project(div(self.n), self.Qcurv), self.t)

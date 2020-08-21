@@ -22,3 +22,13 @@ def CHeaviside(psi, eps):
 """'Continuous Dirac's delta approximation'"""
 def CDelta(psi, eps):
     return conditional(lt(abs(psi),eps), 1.0/(2.0*eps)*(1.0 + ufl.cos(np.pi*psi/eps)), 0.0)
+
+
+"""Surface gradient"""
+def grad_s(f, n):
+    return grad(f) - inner(grad(f),n)*n
+
+
+"""Surface divergence"""
+def dive_s(f,n):
+    div(f) - inner(dot(n, nabla_grad(f)), n)
