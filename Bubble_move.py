@@ -391,15 +391,17 @@ class BubbleMove(TwoPhaseFlows):
             if(self.n_iter % reinit_iters == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
+                    if(self.reinit_method == 'Conservative'):
+                        self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
-                    self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute updated normal vector
                     end()
                 except Exception as e:
                     if(self.rank == 0):
                         print(str(e))
                         print("Aborting simulation...")
                     exit(1)
+            if(self.sigma > DOLFIN_EPS):
+                self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")

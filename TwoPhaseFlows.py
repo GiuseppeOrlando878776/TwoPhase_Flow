@@ -299,7 +299,7 @@ class TwoPhaseFlows():
 
     """Build and solve the system for Level set transport"""
     def solve_Levelset_system(self, phi_curr):
-        # Assemble matrix and right-hand side
+        #Assemble matrix and right-hand side
         assemble(self.a1, tensor = self.A1)
         assemble(self.L1, tensor = self.b1)
 
@@ -363,12 +363,12 @@ class TwoPhaseFlows():
 
     """Build and solve the system for Navier-Stokes part using Standard method"""
     def solve_Standard_NS_system(self, bcs, w_curr):
-        # Assemble matrices and right-hand sides
+        #Assemble matrices and right-hand sides
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
 
-        # Apply boundary conditions
-        for bc in self.bcs:
+        #Apply boundary conditions
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
@@ -383,7 +383,7 @@ class TwoPhaseFlows():
         assemble(self.L2, tensor = self.b2)
 
         #Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
