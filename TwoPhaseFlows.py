@@ -198,30 +198,46 @@ class TwoPhaseFlows():
 
 
     """Interior penalty method"""
-    def IP(self, phi, l, mesh, alpha = 0.1):
+    def IP(self, phi, l, phi_old, mesh, alpha = 0.1, gamma = (1.0 - np.sqrt(2.0)/2.0)):
         #Extract cell diameter and facets's normal
         h = CellDiameter(mesh)
         n_mesh = FacetNormal(mesh)
         h_avg  = (h('+') + h('-'))/2.0
 
-        #Compute the stabilization term
-        r = alpha*h_avg*h_avg*inner(jump(grad(phi), n_mesh), jump(grad(l), n_mesh))*dS
-        return r
+        #Compute the stabilization term for first step
+        r = alpha*h_avg*h_avg*inner(gamma*jump(grad(phi), n_mesh) + gamma*jump(grad(phi_old), n_mesh), jump(grad(l), n_mesh))*dS
+
+        #Compute auxiliary coefficient for BDF2 step
+        gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+
+        #Compute stabilization term for second step
+        rbis = alpha*h_avg*h_avg*gamma2*inner(jump(grad(phi), n_mesh), jump(grad(l), n_mesh))*dS
+
+        return (r, rbis)
 
 
     """SUPG method"""
-    def SUPG(self, phi, l, phi_old, u_old, dt, mesh, scaling):
+    def SUPG(self, phi, l, phi_old, u_old, phi_curr, dt, mesh, scaling, gamma = (1.0 - np.sqrt(2.0)/2.0)):
         #Extract cell diameter
         h = CellDiameter(mesh)
 
-        #Compute the stabilization term
-        r = ((phi - phi_old)/dt + inner(u_old, grad(phi)))* \
+        #Compute the stabilization term for first step
+        r = ((phi - phi_old)/dt + gamma*inner(u_old, grad(phi)) + gamma*inner(u_old, grad(phi_old)))* \
             scaling*h/ufl.Max(2.0*norm(u_old,'L2'),1.0e-3/h)*inner(u_old, grad(l))*dx
-        return r
+
+        #Compute auxiliary coefficient for BDF2 step
+        gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+        gamma3 = (1.0 - gamma2)/(2.0*gamma)
+
+        #Compute stabilization term for second step
+        rbis = ((phi - gamma3*phi_curr - (1.0 - gamma3)*phi_old)/dt + gamma2*inner(u_old, grad(phi)))* \
+               scaling*h/ufl.Max(2.0*norm(u_old,'L2'),1.0e-3/h)*inner(u_old, grad(l))*dx
+
+        return (r, rbis)
 
 
     """Level-set weak formulation"""
-    def LS_weak_form(self, phi, l, phi_old, u_old, dt, mesh, method, param = None):
+    def LS_weak_form(self, phi, l, phi_old, u_old, phi_curr, dt, mesh, method, param = None, gamma = (1.0 - np.sqrt(2.0)/2.0)):
         #Check availability of the method before proceding
         assert method in self.stab_dict, "Stabilization method(" + method + ") not available"
 
@@ -230,28 +246,33 @@ class TwoPhaseFlows():
             raise ValueError("phi_old must be an instance of Function")
         if(not isinstance(u_old, Function)):
             raise ValueError("u_old must be an instance of Function")
+        if(not isinstance(phi_curr, Function)):
+            raise ValueError("phi_curr must be an instance of Function")
 
         #Save the dimension of the problem
         self.n_dim = mesh.geometry().dim()
 
-        #Declare weak formulation
-        F1 = ((phi - phi_old)/dt + inner(u_old, grad(phi)))*l*dx
+        #Declare weak formulation for first step
+        F1 = ((phi - phi_old)/dt + gamma*inner(u_old, grad(phi)) + gamma*inner(u_old, grad(phi_old)))*l*dx
 
         #Add stabilization term (if specified)
+        rbis = 0.0
         if(method == 'SUPG'):
             #Check whether Reynolds number is really available
             assert param is not None, \
             "Stabilization parameter not available in order to use SUPG stabilization (check the call of the function)"
 
             #Add the stabilization term
-            F1 += self.SUPG(phi, l, phi_old, u_old, dt, mesh, param)
+            (r, rbis) = self.SUPG(phi, l, phi_old, u_old, phi_curr, dt, mesh, param)
+            F1 += r
         elif(method == 'IP'):
             #Check whether stabilization parameter is really available
             assert param is not None, \
             "Stabilization parameter not available in order to use IP stabilization (check the call of the function)"
 
             #Add the stabilization term
-            F1 += self.IP(phi, l, mesh, param)
+            (r, rbis) = self.IP(phi, l, phi_old, mesh, param)
+            F1 += r
 
         #Save corresponding weak forms
         self.a1 = lhs(F1)
@@ -260,6 +281,22 @@ class TwoPhaseFlows():
         #Declare matrix and vector for solving
         self.A1 = PETScMatrix()
         self.b1 = PETScVector()
+
+        #Compute auxiliary coefficient for BDF2 step
+        gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+        gamma3 = (1.0 - gamma2)/(2.0*gamma)
+
+        #Declare weak formulation for second step
+        F1_bis = ((phi - gamma3*phi_curr - (1.0 - gamma3)*phi_old)/dt + gamma2*inner(u_old, grad(phi)))*l*dx
+        F1_bis += rbis
+
+        #Save corresponding weak forms
+        self.a1_bis = lhs(F1_bis)
+        self.L1_bis = rhs(F1_bis)
+
+        #Declare matrix and vector for solving
+        self.A1_bis = PETScMatrix()
+        self.b1_bis = PETScVector()
 
 
     """Weak form non-conservative reinitialization (hyperbolic version)"""
@@ -299,12 +336,19 @@ class TwoPhaseFlows():
 
     """Build and solve the system for Level set transport"""
     def solve_Levelset_system(self, phi_curr):
-        # Assemble matrix and right-hand side
+        #Assemble matrix and right-hand side for TR
         assemble(self.a1, tensor = self.A1)
         assemble(self.L1, tensor = self.b1)
 
-        #Solve the level-set system
+        #Solve the TR part of level-set system
         solve(self.A1, phi_curr.vector(), self.b1, self.solver_Levset, self.precon_Levset)
+
+        #Assemble matrix and right-hand side for BDF2
+        assemble(self.a1_bis, tensor = self.A1_bis)
+        assemble(self.L1_bis, tensor = self.b1_bis)
+
+        #Solve the BDF2 part of level-set system
+        solve(self.A1_bis, phi_curr.vector(), self.b1_bis, self.solver_Levset, self.precon_Levset)
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
@@ -363,11 +407,11 @@ class TwoPhaseFlows():
 
     """Build and solve the system for Navier-Stokes part using Standard method"""
     def solve_Standard_NS_system(self, bcs, w_curr):
-        # Assemble matrices and right-hand sides
+        #Assemble matrices and right-hand sides
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
 
-        # Apply boundary conditions
+        #Apply boundary conditions
         for bc in self.bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
