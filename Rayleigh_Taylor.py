@@ -292,7 +292,7 @@ class RayleighTaylor(TwoPhaseFlows):
 
             #Useful dictionary for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'Standard': self.solve_Standard_NS_system}
-            self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr)}
+            self.switcher_arguments_NS_solve = {'Standard': (self.bcs, self.w_curr, self.u_curr, self.p_curr)}
         elif(self.NS_sol_method == 'ICT'):
             self.bcs = [DirichletBC(self.V, Constant((0.0,0.0)),  NoSlip_Boundary(self.height)), \
                         DirichletBC(self.V.sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
@@ -340,10 +340,10 @@ class RayleighTaylor(TwoPhaseFlows):
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
-                self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.u_curr, self.DT, self.rho, self.mu, \
                                   self.phi_curr, self.phi_old, self.eps, Re = self.Re, Fr = np.sqrt(self.At), We = 0.0)
             elif(self.NS_sol_method == 'ICT'):
-                self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
+                self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.u_curr, self.DT, self.rho, self.mu, \
                                      self.phi_curr, self.phi_old, self.eps, Re = self.Re, Fr = np.sqrt(self.At), We = 0.0)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)

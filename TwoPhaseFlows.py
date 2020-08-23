@@ -32,10 +32,13 @@ class TwoPhaseFlows():
 
 
     """Weak formulation for Navier-Stokes"""
-    def NS_weak_form(self, u, p, v, q, u_old, dt, rho, mu, phi_curr, phi_old, eps, n_gamma = None, CDelta = None, **kwargs):
+    def NS_weak_form(self, u, p, v, q, u_old, u_curr, dt, rho, mu, phi_curr, phi_old, eps, n_gamma = None, CDelta = None, \
+                     gamma = (1.0 - np.sqrt(2.0)/2.0), **kwargs):
         #Check correctness of types
         if(not isinstance(u_old, Function)):
             raise ValueError("u_old must be an instance of Function")
+        if(not isinstance(u_curr, Function)):
+            raise ValueError("u_curr must be an instance of Function")
         if(not isinstance(phi_curr, Function)):
             raise ValueError("phi_curr must be an instance of Function")
         if(not callable(rho)):
@@ -50,17 +53,31 @@ class TwoPhaseFlows():
             g = kwargs.get('g')
             sigma = kwargs.get('sigma')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
-               + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
-               - p*div(v)*dx \
-               + div(u)*q*dx \
-               + g*inner(rho(phi_curr, eps)*self.e2, v)*dx
+               + inner(rho(phi_curr, eps)*dot(u_old, gamma*nabla_grad(u)) + rho(phi_old, eps)*dot(u_old, gamma*nabla_grad(u_old)), v)*dx \
+               + 2.0*inner(mu(phi_curr, eps)*gamma*D(u) + mu(phi_old, eps)*gamma*D(u_old), D(v))*dx \
+               - 2.0*gamma*p*div(v)*dx \
+               + (gamma*div(u) + gamma*div(u_old))*q*dx \
+               + gamma*g*inner((rho(phi_old, eps) + rho(phi_curr, eps))*self.e2, v)*dx \
+
+            #Compute useful coefficients
+            gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+            gamma3 = (1.0 - gamma2)/(2.0*gamma)
+
+            #Weak formulation for BDF2 part
+            F2_bis = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_curr, eps)*gamma3*u_curr - rho(phi_old, eps)*(1.0 - gamma3)*u_old, v)*dx \
+                   + inner(rho(phi_curr, eps)*dot(u_old, gamma2*nabla_grad(u)), v)*dx \
+                   + 2.0*inner(mu(phi_curr, eps)*gamma2*D(u), D(v))*dx \
+                   - gamma2*p*div(v)*dx \
+                   + gamma2*div(u)*q*dx \
+                   + gamma2*g*inner(rho(phi_curr, eps)*self.e2, v)*dx
             if(sigma > DOLFIN_EPS):
                 if(not callable(CDelta)):
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += sigma*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += gamma*sigma*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*\
+                      (mgrad(phi_old)*CDelta(phi_old, eps) + mgrad(phi_curr)*CDelta(phi_curr, eps))*dx
+                F2_bis += gamma2*sigma*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         elif(len(kwargs) == 3):
             assert 'Re' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Re' not found (check function call)"
             assert 'Fr' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Fr' not found (check function call)"
@@ -69,17 +86,31 @@ class TwoPhaseFlows():
             Fr = kwargs.get('Fr')
             We = kwargs.get('We')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
-               + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0/Re*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
-               - p*div(v)*dx \
-               + div(u)*q*dx \
-               + 1.0/(Fr*Fr)*inner(rho(phi_curr, eps)*self.e2, v)*dx
+               + inner(rho(phi_curr, eps)*dot(u_old, gamma*nabla_grad(u)) + rho(phi_old, eps)*dot(u_old, gamma*nabla_grad(u_old)), v)*dx \
+               + 2.0/Re*inner(mu(phi_curr, eps)*gamma*D(u) + mu(phi_old, eps)*gamma*D(u_old), D(v))*dx \
+               - 2.0*gamma*p*div(v)*dx \
+               + (gamma*div(u) + gamma*div(u_old))*q*dx \
+               + gamma*1.0/(Fr*Fr)*inner((rho(phi_old, eps) + rho(phi_curr, eps))*self.e2, v)*dx
+
+            #Compute useful coefficients
+            gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+            gamma3 = (1.0 - gamma2)/(2.0*gamma)
+
+            #Weak formulation for BDF2 part
+            F2_bis = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_curr, eps)*gamma3*u_curr - rho(phi_old, eps)*(1.0 - gamma3)*u_old, v)*dx \
+                   + inner(rho(phi_curr, eps)*dot(u_old, gamma2*nabla_grad(u)), v)*dx \
+                   + 2.0/Re*inner(mu(phi_curr, eps)*gamma2*D(u), D(v))*dx \
+                   - gamma2*p*div(v)*dx \
+                   + gamma2*div(u)*q*dx \
+                   + gamma2*1.0/(Fr*Fr)*inner(rho(phi_curr, eps)*self.e2, v)*dx
             if(We > DOLFIN_EPS):
                 if(not callable(CDelta)):
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += (1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += gamma*(1.0/We)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*\
+                      (mgrad(phi_old)*CDelta(phi_old, eps) + mgrad(phi_curr)*CDelta(phi_curr, eps))*dx
+                F2_bis += gamma2*(1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         else:
             raise ValueError("Wrong number of arguments in Standard NS weak form setting (check function call)")
 
@@ -90,14 +121,23 @@ class TwoPhaseFlows():
         self.A2 = PETScMatrix()
         self.b2 = PETScVector()
 
+        self.a2_BDF2 = lhs(F2_bis)
+        self.L2_BDF2 = rhs(F2_bis)
+
+        self.A2_BDF2 = PETScMatrix()
+        self.b2_BDF2 = PETScVector()
+
 
     """Weak formulation for tentative velocity"""
-    def ICT_weak_form_1(self, u, v, u_old, p_old, dt, rho, mu, phi_curr, phi_old, eps, n_gamma = None, CDelta = None, **kwargs):
+    def ICT_weak_form_1(self, u, v, u_old, p_old, u_curr, dt, rho, mu, phi_curr, phi_old, eps, n_gamma = None, CDelta = None, \
+                        gamma = (1.0 - np.sqrt(2.0)/2.0), **kwargs):
         #Check the correctness of type
         if(not isinstance(u_old, Function)):
             raise ValueError("u_old must be an instance of Function")
         if(not isinstance(p_old, Function)):
             raise ValueError("p_old must be an instance of Function")
+        if(not isinstance(u_curr, Function)):
+            raise ValueError("u_curr must be an instance of Function")
         if(not isinstance(phi_curr, Function)):
             raise ValueError("phi_curr must be an instance of Function")
         if(not callable(rho)):
@@ -112,16 +152,29 @@ class TwoPhaseFlows():
             g = kwargs.get('g')
             sigma = kwargs.get('sigma')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
-               + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
-               - p_old*div(v)*dx \
-               + g*inner(rho(phi_curr, eps)*self.e2, v)*dx
+               + inner(rho(phi_curr, eps)*dot(u_old, gamma*nabla_grad(u)) + rho(phi_old, eps)*dot(u_old, gamma*nabla_grad(u_old)), v)*dx \
+               + 2.0*inner(mu(phi_curr, eps)*gamma*D(u) + mu(phi_old, eps)*gamma*D(u_old), D(v))*dx \
+               - 2.0*gamma*p_old*div(v)*dx \
+               + gamma*g*inner((rho(phi_old, eps) + rho(phi_curr, eps))*self.e2, v)*dx
+
+            #Compute useful coefficients
+            gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+            gamma3 = (1.0 - gamma2)/(2.0*gamma)
+
+            #Weak formulation for BDF2 part
+            F2_bis = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_curr, eps)*gamma3*u_curr - rho(phi_old, eps)*(1.0 - gamma3)*u_old, v)*dx \
+                   + inner(rho(phi_curr, eps)*dot(u_old, gamma2*nabla_grad(u)), v)*dx \
+                   + 2.0*inner(mu(phi_curr, eps)*gamma2*D(u), D(v))*dx \
+                   - gamma2*p_old*div(v)*dx \
+                   + gamma2*g*inner(rho(phi_curr, eps)*self.e2, v)*dx
             if(sigma > DOLFIN_EPS):
                 if(not callable(CDelta)):
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += sigma*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += gamma*sigma*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*\
+                      (mgrad(phi_old)*CDelta(phi_old, eps) + mgrad(phi_curr)*CDelta(phi_curr, eps))*dx
+                F2_bis += gamma2*sigma*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         elif(len(kwargs) == 3):
             assert 'Re' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Re' not found (check function call)"
             assert 'Fr' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Fr' not found (check function call)"
@@ -130,16 +183,29 @@ class TwoPhaseFlows():
             Fr = kwargs.get('Fr')
             We = kwargs.get('We')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
-               + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0/Re*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
-               - p_old*div(v)*dx \
-               + 1.0/(Fr*Fr)*inner(rho(phi_curr, eps)*self.e2, v)*dx
+               + inner(rho(phi_curr, eps)*dot(u_old, gamma*nabla_grad(u)) + rho(phi_old, eps)*dot(u_old, gamma*nabla_grad(u_old)), v)*dx \
+               + 2.0/Re*inner(mu(phi_curr, eps)*gamma*D(u) + mu(phi_old, eps)*gamma*D(u_old), D(v))*dx \
+               - 2.0*gamma*p_old*div(v)*dx \
+               + gamma*1.0/(Fr*Fr)*2.0*inner((rho(phi_old, eps) + rho(phi_curr, eps))*self.e2, v)*dx
+
+            #Compute useful coefficients
+            gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+            gamma3 = (1.0 - gamma2)/(2.0*gamma)
+
+            #Weak formulation for BDF2 part
+            F2_bis = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_curr, eps)*gamma3*u_curr - rho(phi_old, eps)*(1.0 - gamma3)*u_old, v)*dx \
+                   + inner(rho(phi_curr, eps)*dot(u_old, gamma2*nabla_grad(u)), v)*dx \
+                   + 2.0/Re*inner(mu(phi_curr, eps)*gamma2*D(u), D(v))*dx \
+                   - gamma2*p_old*div(v)*dx \
+                   + 1.0/(Fr*Fr)*gamma2*inner(rho(phi_curr, eps)*self.e2, v)*dx
             if(We > DOLFIN_EPS):
                 if(not callable(CDelta)):
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += (1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += gamma*(1.0/We)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*\
+                      (mgrad(phi_old)*CDelta(phi_old, eps) + mgrad(phi_curr)*CDelta(phi_curr, eps))*dx
+                F2_bis += gamma2*(1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         else:
             raise ValueError("Wrong number of arguments in ICT-Step 1 weak form setting (check function call)")
 
@@ -149,6 +215,12 @@ class TwoPhaseFlows():
 
         self.A2 = PETScMatrix()
         self.b2 = PETScVector()
+
+        self.a2_BDF2 = lhs(F2_bis)
+        self.L2_BDF2 = rhs(F2_bis)
+
+        self.A2_BDF2 = PETScMatrix()
+        self.b2_BDF2 = PETScVector()
 
 
     """Weak formulation for pressure correction"""
@@ -406,8 +478,8 @@ class TwoPhaseFlows():
 
 
     """Build and solve the system for Navier-Stokes part using Standard method"""
-    def solve_Standard_NS_system(self, bcs, w_curr):
-        #Assemble matrices and right-hand sides
+    def solve_Standard_NS_system(self, bcs, w_curr, u_curr, p_curr):
+        #Assemble matrices and right-hand sides for TR part
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
 
@@ -416,13 +488,26 @@ class TwoPhaseFlows():
             bc.apply(self.A2)
             bc.apply(self.b2)
 
-        #Solve the system
+        #Solve the TR system
         solve(self.A2, w_curr.vector(), self.b2, self.solver_Standard_NS, self.precon_Standard_NS)
+
+        (u_curr, p_curr) = w_curr.split(True)
+        #Assemble matrix and right-hand side for the BDF2 part
+        assemble(self.a2_BDF2, tensor = self.A2_BDF2)
+        assemble(self.L2_BDF2, tensor = self.b2_BDF2)
+
+        #Apply boundary conditions
+        for bc in self.bcs:
+            bc.apply(self.A2_BDF2)
+            bc.apply(self.b2_BDF2)
+
+        #Solve the BDF2 system
+        solve(self.A2_BDF2, w_curr.vector(), self.b2_BDF2, self.solver_Standard_NS, self.precon_Standard_NS)
 
 
     """Build and solve the system for Navier-Stokes part using ICT method"""
     def solve_ICT_NS_systems(self, bcs, u_curr, p_curr):
-        #Assemble matrix and right-hand side for the first step
+        #Assemble matrix and right-hand side for the TR first step
         assemble(self.a2, tensor = self.A2)
         assemble(self.L2, tensor = self.b2)
 
@@ -431,8 +516,20 @@ class TwoPhaseFlows():
             bc.apply(self.A2)
             bc.apply(self.b2)
 
-        #Solve the first system
+        #Solve the TR first system
         solve(self.A2, u_curr.vector(), self.b2, self.solver_ICT_1, self.precon_ICT_1)
+
+        #Assemble matrix and right-hand side for the BDF2 first step
+        assemble(self.a2_BDF2, tensor = self.A2_BDF2)
+        assemble(self.L2_BDF2, tensor = self.b2_BDF2)
+
+        #Apply boundary conditions
+        for bc in self.bcs:
+            bc.apply(self.A2_BDF2)
+            bc.apply(self.b2_BDF2)
+
+        #Solve the BDF2 first system
+        solve(self.A2_BDF2, u_curr.vector(), self.b2_BDF2, self.solver_ICT_1, self.precon_ICT_1)
 
         #Assemble and solve the second system
         assemble(self.a2_bis, tensor = self.A2_bis)
