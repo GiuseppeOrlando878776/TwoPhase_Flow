@@ -25,6 +25,8 @@ class TwoPhaseFlows():
         self.precon_ICT_2 = "default"
         self.solver_ICT_3 = "gmres"
         self.precon_ICT_3 = "default"
+        self.solver_Curv = "gmres"
+        self.precon_Curv = "default"
 
         #Declare useful constant vectors
         self.e1 = Constant((1.0, 0.0))
@@ -406,6 +408,40 @@ class TwoPhaseFlows():
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx
 
 
+    """Curvature weak formulation"""
+    def Curvature_weak_form(self, H_curr, z, H_old, H_int, u_curr, u_old, n_gamma, dt, gamma = (1.0 - np.sqrt(2.0)/2.0)):
+        #Check the correctness of type
+        if(not isinstance(H_curr, Function)):
+            raise ValueError("H_curr must be an instance of Function")
+        if(not isinstance(H_old, Function)):
+            raise ValueError("H_int must be an instance of Function")
+        if(not isinstance(H_old, Function)):
+            raise ValueError("H_old must be an instance of Function")
+        if(not isinstance(u_curr, Function)):
+            raise ValueError("u_curr must be an instance of Function")
+        if(not isinstance(n_gamma, Function)):
+            raise ValueError("u_old must be an instance of Function")
+
+        #Declare weak formulation for TR part
+        self.F3 = ((H_int - H_old)/dt + gamma*inner(u_curr, n_gamma)*inner(n_gamma, grad(H_int)) + \
+                                        gamma*inner(u_old, n_gamma)*inner(n_gamma, grad(H_old)) + \
+                                        gamma*H_int*H_int*inner(u_curr, n_gamma) + \
+                                        gamma*H_old*H_old*inner(u_old, n_gamma))*z*dx \
+                - gamma*inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
+                + gamma*inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx \
+                - gamma*inner(grad_s(inner(u_old, n_gamma), n_gamma), grad(z))*dx \
+                + gamma*inner(n_gamma, dot(nabla_grad(grad_s(inner(u_old, n_gamma), n_gamma)), n_gamma))*z*dx
+
+        #Compute useful coefficients
+        gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
+        gamma3 = (1.0 - gamma2)/(2.0*gamma)
+
+        #Declare weak formulation for BDF2 part
+        self.F3_BDF2 = ((H_curr - gamma3*H_int - (1.0 - gamma3)*H_old)/dt + gamma3*inner(u_curr, n_gamma)*inner(n_gamma, grad(H_curr)) + \
+                        gamma3*H_curr*H_curr*inner(u_curr, n_gamma))*z*dx \
+                     - gamma2*inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
+                     + gamma2*inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx
+
     """Build and solve the system for Level set transport"""
     def solve_Levelset_system(self, phi_curr):
         #Assemble matrix and right-hand side for TR
@@ -484,7 +520,7 @@ class TwoPhaseFlows():
         assemble(self.L2, tensor = self.b2)
 
         #Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
@@ -497,7 +533,7 @@ class TwoPhaseFlows():
         assemble(self.L2_BDF2, tensor = self.b2_BDF2)
 
         #Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2_BDF2)
             bc.apply(self.b2_BDF2)
 
@@ -512,7 +548,7 @@ class TwoPhaseFlows():
         assemble(self.L2, tensor = self.b2)
 
         #Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
@@ -524,7 +560,7 @@ class TwoPhaseFlows():
         assemble(self.L2_BDF2, tensor = self.b2_BDF2)
 
         #Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2_BDF2)
             bc.apply(self.b2_BDF2)
 
@@ -539,3 +575,15 @@ class TwoPhaseFlows():
         #Assemble and solve the third system
         assemble(self.L2_tris, tensor = self.b2_tris)
         solve(self.A2_tris, u_curr.vector(), self.b2_tris, self.solver_ICT_3, self.precon_ICT_3)
+
+
+    """Build and solve the system for Curvature"""
+    def solve_Curvature_system(self, H_int, H_curr, bcs):
+        solve(self.F3 == 0, H_int, bcs = bcs, \
+              solver_parameters={"newton_solver": {"linear_solver": self.solver_Curv, "preconditioner": self.precon_Curv,\
+                                 "maximum_iterations": 30, "absolute_tolerance": 1e-3, "relative_tolerance": 1e-3}}, \
+              form_compiler_parameters={"optimize": True})
+        solve(self.F3_BDF2 == 0, H_curr, bcs = bcs, \
+              solver_parameters={"newton_solver": {"linear_solver": self.solver_Curv, "preconditioner": self.precon_Curv,\
+                                 "maximum_iterations": 30, "absolute_tolerance": 1e-3, "relative_tolerance": 1e-3}}, \
+              form_compiler_parameters={"optimize": True})
