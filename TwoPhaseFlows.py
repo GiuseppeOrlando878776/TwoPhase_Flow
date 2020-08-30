@@ -312,9 +312,9 @@ class TwoPhaseFlows():
             raise ValueError("u_old must be an instance of Function")
 
         #Declare weak formulation
-        self.F3 = ((H_curr - H_old)/dt + inner(u_curr, grad(H_curr)) - H_curr*H_curr*inner(u_curr, n_gamma))*z*dx \
-                + inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
-                - inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx
+        self.F3 = ((H_curr - H_old)/dt + inner(u_curr, n_gamma)*inner(grad(H_curr), n_gamma) + H_curr*H_curr*inner(u_curr, n_gamma))*z*dx \
+                - inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
+                + inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx
 
 
     """Build and solve the system for Level-set transport"""
