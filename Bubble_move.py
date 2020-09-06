@@ -152,6 +152,7 @@ class BubbleMove(TwoPhaseFlows):
             self.q = TestFunction(self.P)
         self.phi = TrialFunction(self.Q)
         self.l   = TestFunction(self.Q)
+        self.H   = TrialFunction(self.Qcurv)
         self.z   = TestFunction(self.Qcurv)
 
         #Define functions to store solution
@@ -177,6 +178,7 @@ class BubbleMove(TwoPhaseFlows):
         #Define function and vector for plotting level-set and computing volume
         self.rho_interp = Function(self.Q)
         self.lev_set    = Function(self.Q)
+        self.H_interp   = Function(self.Qcurv)
 
         #Parameters for reinitialization steps
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
@@ -319,7 +321,7 @@ class BubbleMove(TwoPhaseFlows):
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
 
             #Set variational problem for curvature
-            self.Curvature_weak_form(self.H_curr, self.z, self.H_old, self.u_curr, self.n, self.DT)
+            self.Curvature_weak_form(self.H, self.z, self.H_old, self.u_curr, self.n, self.DT)
         except ValueError as e:
             if(self.rank == 0):
                 print(str(e))
@@ -346,7 +348,8 @@ class BubbleMove(TwoPhaseFlows):
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
             self.vtkfile_Hev << (self.H_old, self.t)
-            self.vtkfile_Hcomp << (project(div(self.n), self.Qcurv), self.t)
+            self.H_interp.assign(project(div(self.n), self.Qcurv))
+            self.vtkfile_Hcomp << (self.H_interp, self.t)
 
         #Compute benchamrk quantities
         if(self.reinit_method == 'Conservative'):
@@ -469,4 +472,5 @@ class BubbleMove(TwoPhaseFlows):
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
             self.vtkfile_Hev << (self.H_old, self.t)
-            self.vtkfile_Hcomp << (project(div(self.n), self.Qcurv), self.t)
+            self.H_interp.assign(project(div(self.n), self.Qcurv))
+            self.vtkfile_Hcomp << (self.H_interp, self.t)
