@@ -384,8 +384,8 @@ class TwoPhaseFlows():
         #Solve the level-set system
         solve(self.A1, phi_curr.vector(), self.b1, self.solver_Levset, self.precon_Levset)
         tmp = phi_curr.vector().get_local()
-        np.clip(tmp, -xi, 1.0 + xi)
-        phi_curr.vector().set_local(tmp)
+        #np.clip(tmp, -xi, 1.0 + xi)
+        #phi_curr.vector().set_local(tmp)
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
