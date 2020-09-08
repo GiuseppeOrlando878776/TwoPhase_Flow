@@ -443,8 +443,7 @@ class BubbleMove(TwoPhaseFlows):
 
             #Solve curvature
             begin(int(LogLevel.INFO) + 1,"Solving Curvature")
-            self.solve_Curvature_system(self.H_int, self.H_curr, [DirichletBC(self.Qcurv, Constant(0.0), NoSlip_Boundary(self.height)), \
-                                                                  DirichletBC(self.Qcurv, Constant(0.0), FreeSlip_Boundary(self.base))])
+            self.solve_Curvature_system(self.H_int, self.H_curr)
             end()
 
             #Prepare to next step assign previous-step solution

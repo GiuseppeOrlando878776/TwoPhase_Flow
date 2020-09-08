@@ -27,3 +27,7 @@ def CDelta(psi, eps):
 """Surface gradient"""
 def grad_s(f, n):
     return grad(f) - inner(grad(f),n)*n
+
+"""Surface divergence"""
+def dive_s(f,n):
+    return div(f) - inner(dot(n, nabla_grad(f)), n)

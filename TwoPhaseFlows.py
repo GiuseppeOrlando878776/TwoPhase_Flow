@@ -427,10 +427,8 @@ class TwoPhaseFlows():
                                         gamma*inner(u_old, n_gamma)*inner(n_gamma, grad(H_old)) + \
                                         gamma*H_int*H_int*inner(u_curr, n_gamma) + \
                                         gamma*H_old*H_old*inner(u_old, n_gamma))*z*dx \
-                - gamma*inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
-                + gamma*inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx \
-                - gamma*inner(grad_s(inner(u_old, n_gamma), n_gamma), grad(z))*dx \
-                + gamma*inner(n_gamma, dot(nabla_grad(grad_s(inner(u_old, n_gamma), n_gamma)), n_gamma))*z*dx
+                + gamma*dive_s(grad_s(inner(u_curr, n_gamma), n_gamma), n_gamma)*z*dx \
+                + gamma*dive_s(grad_s(inner(u_old, n_gamma), n_gamma), n_gamma)*z*dx
 
         #Compute useful coefficients
         gamma2 = (1.0 - 2.0*gamma)/(2.0*(1.0 - gamma))
@@ -439,8 +437,8 @@ class TwoPhaseFlows():
         #Declare weak formulation for BDF2 part
         self.F3_BDF2 = ((H_curr - gamma3*H_int - (1.0 - gamma3)*H_old)/dt + gamma3*inner(u_curr, n_gamma)*inner(n_gamma, grad(H_curr)) + \
                         gamma3*H_curr*H_curr*inner(u_curr, n_gamma))*z*dx \
-                     - gamma2*inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
-                     + gamma2*inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx
+                     + gamma2*dive_s(grad_s(inner(u_curr, n_gamma), n_gamma), n_gamma)*z*dx
+
 
     """Build and solve the system for Level set transport"""
     def solve_Levelset_system(self, phi_curr):
@@ -578,12 +576,12 @@ class TwoPhaseFlows():
 
 
     """Build and solve the system for Curvature"""
-    def solve_Curvature_system(self, H_int, H_curr, bcs):
-        solve(self.F3 == 0, H_int, bcs = bcs, \
+    def solve_Curvature_system(self, H_int, H_curr):
+        solve(self.F3 == 0, H_int, \
               solver_parameters={"newton_solver": {"linear_solver": self.solver_Curv, "preconditioner": self.precon_Curv,\
-                                 "maximum_iterations": 30, "absolute_tolerance": 1e-3, "relative_tolerance": 1e-3}}, \
+                                 "maximum_iterations": 50, "absolute_tolerance": 1e-3, "relative_tolerance": 1e-3}}, \
               form_compiler_parameters={"optimize": True})
-        solve(self.F3_BDF2 == 0, H_curr, bcs = bcs, \
+        solve(self.F3_BDF2 == 0, H_curr, \
               solver_parameters={"newton_solver": {"linear_solver": self.solver_Curv, "preconditioner": self.precon_Curv,\
-                                 "maximum_iterations": 30, "absolute_tolerance": 1e-3, "relative_tolerance": 1e-3}}, \
+                                 "maximum_iterations": 50, "absolute_tolerance": 1e-3, "relative_tolerance": 1e-3}}, \
               form_compiler_parameters={"optimize": True})
