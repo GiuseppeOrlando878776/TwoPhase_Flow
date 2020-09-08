@@ -370,7 +370,8 @@ class TwoPhaseFlows():
                        - phi_intermediate*(1.0 - phi_intermediate)*inner(grad(l), n_gamma)*dx \
                        + avg(phi_intermediate*(1.0 - phi_intermediate))*inner(n_gamma, jump(l, self.n_mesh))*dS \
                        + inner(n_gamma, jump(phi_intermediate*(1.0 - phi_intermediate), self.n_mesh))*\
-                         inner(jump(ufl.sign((1.0 - 2.0*phi_intermediate)*inner(n_gamma, self.n_mesh)), self.n_mesh), jump(l, self.n_mesh))*dS \
+                         inner(jump(ufl.sign((1.0 - 2.0*phi_intermediate)*inner(n_gamma, self.n_mesh)), self.n_mesh), \
+                               jump(l, self.n_mesh))*dS \
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx \
                        - eps_reinit*inner(avg(grad(phi_intermediate)), n_gamma)*inner(n_gamma, jump(l, self.n_mesh))*dS \
 
@@ -436,9 +437,9 @@ class TwoPhaseFlows():
                 break
 
             #Prepare for next iteration
-            tmp = phi_intermediate.vector().get_local()
-            np.clip(tmp, -xi, 1.0 + xi)
-            phi_intermediate.vector().set_local(tmp)
+            #tmp = phi_intermediate.vector().get_local()
+            #np.clip(tmp, -xi, 1.0 + xi)
+            #phi_intermediate.vector().set_local(tmp)
             phi0.assign(phi_intermediate)
 
         #Assign the reinitialized level-set to the current solution

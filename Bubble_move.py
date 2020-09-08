@@ -201,9 +201,18 @@ class BubbleMove(TwoPhaseFlows):
         self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
-        self.phi0 = Function(self.Q)
-        self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
-                                                 #reinitialization and it is also useful for clearness
+        if(self.LS_sol_method == 'Continuous'):
+            self.phi_cont = TrialFunction(self.Q)
+            self.l_cont   = TestFunction(self.Q)
+            self.phi0 = Function(self.Q)
+            self.phi_intermediate = Function(self.Q) #This is fundamental in case on 'non-conservative'
+                                                     #reinitialization and it is also useful for clearness
+        elif(self.LS_sol_method == 'DG'):
+            self.phi_cont = TrialFunction(self.Qcont)
+            self.l_cont   = TestFunction(self.Qcont)
+            self.phi0 = Function(self.Qcont)
+            self.phi_intermediate = Function(self.Qcont) #This is fundamental in case on 'non-conservative'
+                                                         #reinitialization and it is also useful for clearness
 
         #Define function and vector for plotting level-set and computing volume
         if(self.LS_sol_method == 'Continuous'):
@@ -229,15 +238,15 @@ class BubbleMove(TwoPhaseFlows):
             if(self.LS_sol_method == 'Continuous'):
                 self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form}
             elif(self.LS_sol_method == 'DG'):
-                self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form_DG}
+                self.switcher_reinit_varf = {'Non_Conservative_Hyperbolic': self.NCLSM_hyperbolic_weak_form}
             self.switcher_arguments_reinit_varf = {'Non_Conservative_Hyperbolic': \
-                                                   (self.phi, self.l, self.phi0, self.phi_curr, self.dt_reinit, \
+                                                   (self.phi_cont, self.l_cont, self.phi0, self.phi_curr_cont, self.dt_reinit, \
                                                     self.gamma_reinit, self.beta_reinit)}
 
             #Dictionary for reinitialization solution
             self.switcher_reinit_solve = {'Non_Conservative_Hyperbolic': self.NC_Levelset_hyperbolic_reinit}
             self.switcher_arguments_reinit_solve = {'Non_Conservative_Hyperbolic': \
-                                                    (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
+                                                    (self.phi_curr_cont, self.phi_intermediate, self.phi0, self.dt_reinit, \
                                                      self.max_subiters, self.tol_recon)}
         elif(self.reinit_method == 'Conservative'):
             hmin = MPI.min(self.comm, self.mesh.hmin())
@@ -249,14 +258,14 @@ class BubbleMove(TwoPhaseFlows):
             if(self.LS_sol_method == 'Continuous'):
                 self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
             elif(self.LS_sol_method == 'DG'):
-                self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form_DG}
+                self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
             self.switcher_arguments_reinit_varf = {'Conservative': \
-                                                   (self.phi_intermediate, self.l, self.phi0, self.n, self.dt_reinit, self.eps)}
+                                                   (self.phi_intermediate, self.l_cont, self.phi0, self.n, self.dt_reinit, self.eps)}
 
             #Dictionary for reinitialization solution
             self.switcher_reinit_solve = {'Conservative': self.C_Levelset_reinit}
             self.switcher_arguments_reinit_solve = {'Conservative': \
-                                                    (self.phi_curr, self.phi_intermediate, self.phi0, self.dt_reinit, \
+                                                    (self.phi_curr_cont, self.phi_intermediate, self.phi0, self.dt_reinit, \
                                                      self.max_subiters, self.tol_recon)}
 
 
@@ -358,17 +367,21 @@ class BubbleMove(TwoPhaseFlows):
             if(self.NS_sol_method == 'Standard'):
                 if(self.dim_choice == 'Dimensional'):
                     self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
-                                      self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                                      self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, \
+                                      g = self.g, sigma = self.sigma)
                 elif(self.dim_choice == 'Non_Dimensional'):
                     self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
-                                      self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
+                                      self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, \
+                                      Re = self.Re, Fr = 1.0, We = self.Bo)
             elif(self.NS_sol_method == 'ICT'):
                 if(self.dim_choice == 'Dimensional'):
                     self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
-                                         self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                                         self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, \
+                                         g = self.g, sigma = self.sigma)
                 elif(self.dim_choice == 'Non_Dimensional'):
                     self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
-                                         self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, Re = self.Re, Fr = 1.0, We = self.Bo)
+                                         self.phi_curr_cont, self.phi_old_cont, self.eps, self.n, self.Appr_Delta, \
+                                         Re = self.Re, Fr = 1.0, We = self.Bo)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.phi_curr_cont, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr_cont, self.eps)
         except ValueError as e:
@@ -475,7 +488,7 @@ class BubbleMove(TwoPhaseFlows):
             elif(self.LS_sol_method == 'DG'):
                 self.phi_curr_cont.assign(project(self.phi_curr, self.Qcont))
                 self.phi_old_cont.assign(project(self.phi_old, self.Qcont))
-            
+
             #Solve Level-set reinit
             if(reinit_iters != 0 and self.n_iter % reinit_iters == 0):
                 try:
