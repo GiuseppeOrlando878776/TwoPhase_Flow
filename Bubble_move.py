@@ -152,7 +152,6 @@ class BubbleMove(TwoPhaseFlows):
             self.q = TestFunction(self.P)
         self.phi = TrialFunction(self.Q)
         self.l   = TestFunction(self.Q)
-        self.H   = TrialFunction(self.Qcurv)
         self.z   = TestFunction(self.Qcurv)
 
         #Define functions to store solution
@@ -321,7 +320,7 @@ class BubbleMove(TwoPhaseFlows):
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.phi_curr, self.eps)
 
             #Set variational problem for curvature
-            self.Curvature_weak_form(self.H, self.z, self.H_old, self.u_curr, self.n, self.DT)
+            self.Curvature_weak_form(self.H_curr, self.z, self.H_old, self.u_curr, self.n, self.DT)
         except ValueError as e:
             if(self.rank == 0):
                 print(str(e))
@@ -445,8 +444,7 @@ class BubbleMove(TwoPhaseFlows):
 
             #Solve curvature
             begin(int(LogLevel.INFO) + 1,"Solving Curvature")
-            self.solve_Curvature_system(self.H_curr, [DirichletBC(self.Qcurv, Constant(0.0), NoSlip_Boundary(self.height)), \
-                                                      DirichletBC(self.Qcurv, Constant(0.0), FreeSlip_Boundary(self.base))])
+            self.solve_Curvature_system(self.H_curr)
             end()
 
             #Prepare to next step assign previous-step solution

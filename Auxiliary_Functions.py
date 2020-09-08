@@ -31,4 +31,4 @@ def grad_s(f, n):
 
 """Surface divergence"""
 def dive_s(f,n):
-    div(f) - inner(dot(n, nabla_grad(f)), n)
+    return div(f) - inner(dot(n, nabla_grad(f)), n)

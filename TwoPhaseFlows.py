@@ -300,8 +300,10 @@ class TwoPhaseFlows():
 
 
     """Curvature weak formulation"""
-    def Curvature_weak_form(self, H, z, H_old, u_curr, n_gamma, dt):
+    def Curvature_weak_form(self, H_curr, z, H_old, u_curr, n_gamma, dt):
         #Check the correctness of type
+        if(not isinstance(H_curr, Function)):
+            raise ValueError("H_curr must be an instance of Function")
         if(not isinstance(H_old, Function)):
             raise ValueError("H_old must be an instance of Function")
         if(not isinstance(u_curr, Function)):
@@ -310,17 +312,8 @@ class TwoPhaseFlows():
             raise ValueError("u_old must be an instance of Function")
 
         #Declare weak formulation
-        F3 = ((H - H_old)/dt + inner(u_curr, n_gamma)*inner(grad(H), n_gamma))*z*dx \
-           - inner(grad_s(inner(u_curr, n_gamma), n_gamma), grad(z))*dx \
-           + inner(n_gamma, dot(nabla_grad(grad_s(inner(u_curr, n_gamma), n_gamma)), n_gamma))*z*dx \
-           + inner(u_curr, n_gamma)*inner(grad(n_gamma), nabla_grad(n_gamma))*z*dx
-
-        self.a3 = lhs(F3)
-        self.L3 = rhs(F3)
-
-        #Declare matrix and vector
-        self.A3 = PETScMatrix()
-        self.b3 = PETScVector()
+        self.F3 = ((H_curr - H_old)/dt + inner(u_curr, n_gamma)*inner(grad(H_curr), n_gamma) + H_curr*H_curr*inner(u_curr, n_gamma))*z*dx \
+                + dive_s(grad_s(inner(u_curr, n_gamma), n_gamma), n_gamma)*z*dx
 
 
     """Build and solve the system for Level-set transport"""
@@ -427,15 +420,8 @@ class TwoPhaseFlows():
 
 
     """Build and solve the system for Curvature"""
-    def solve_Curvature_system(self, H_curr, bcs):
-        #Assemble matrices and right-hand sides
-        assemble(self.a3, tensor = self.A3)
-        assemble(self.L3, tensor = self.b3)
-
-        #Apply boundary conditions
-        for bc in bcs:
-            bc.apply(self.A3)
-            bc.apply(self.b3)
-
-        #Solve the system
-        solve(self.A3, H_curr.vector(), self.b3, self.solver_Curv, self.precon_Curv)
+    def solve_Curvature_system(self, H_curr):
+        solve(self.F3 == 0, H_curr, \
+              solver_parameters={"newton_solver": {"linear_solver": self.solver_Curv, "preconditioner": self.precon_Curv,\
+                                 "maximum_iterations": 50, "absolute_tolerance": 1e-3, "relative_tolerance": 1e-3}}, \
+              form_compiler_parameters={"optimize": True})
