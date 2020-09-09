@@ -409,6 +409,10 @@ class BubbleMove(TwoPhaseFlows):
         #Save initial state and start loop
         self.plot_and_volume()
         self.timeseries.close() #Close for safety in case some system fails to reach convergence
+        namefile_mesh = os.getcwd() + '/' + self.Param["Saving_Directory"] + '/mesh.h5'
+        mesh_file = HDF5File(MPI.comm_world, namefile_mesh, 'w')
+        mesh_file.write(self.mesh, "/mesh")
+        mesh_file.close()
         self.t += self.dt
         while self.t <= self.t_end:
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t) + " s")
@@ -465,9 +469,28 @@ class BubbleMove(TwoPhaseFlows):
 
         #Save the final state
         if(self.n_iter % self.save_iters != 0):
+            self.phi_vec = self.phi_old.vector().get_local()
+            #Construct vector of ones inside the bubble
+            if(self.reinit_method == 'Conservative'):
+                self.tmp = 1.0*(self.phi_vec < 0.5)
+            elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
+                self.tmp = 1.0*(self.phi_vec < 0.0)
+            #Assign vector to FE function
+            self.lev_set.vector().set_local(self.tmp)
+            self.vtkfile_phi << (self.lev_set, self.t)
             self.vtkfile_u << (self.u_old, self.t)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
             self.vtkfile_Hev << (self.H_old, self.t)
             self.H_interp.assign(project(div(self.n), self.Qcurv))
             self.vtkfile_Hcomp << (self.H_interp, self.t)
+
+        #Save the final solution for convergence analysis
+        namefile_phi = os.getcwd() + '/' + self.Param["Saving_Directory"] + '/phi.h5'
+        phi_file = HDF5File(MPI.comm_world, namefile_phi, 'w')
+        phi_file.write(self.phi_old, "/final")
+        phi_file.close()
+        namefile_u = os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.h5'
+        u_file = HDF5File(MPI.comm_world, namefile_u, 'w')
+        u_file.write(self.u_old, "/final")
+        u_file.close()
