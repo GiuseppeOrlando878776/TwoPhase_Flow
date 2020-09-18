@@ -10,6 +10,7 @@ class TwoPhaseFlows():
         self.stab_dict = {'IP', 'SUPG', 'None'}
         self.NS_sol_dict = {'Standard', 'ICT'}
         self.reinit_method_dict = {'Non_Conservative_Hyperbolic', 'Conservative'}
+        self.normal_dict = {'Laplace_Beltrami', 'Evolution'}
 
         #Save solvers and preconditioners settings; in this way we prepare ourselves
         #in case the option to pass it through configuration file will be added in a future version
@@ -17,6 +18,8 @@ class TwoPhaseFlows():
         self.precon_Levset = "default"
         self.solver_recon = "gmres"
         self.precon_recon = "default"
+        self.solver_normal = "gmres"
+        self.precon_normal = "default"
         self.solver_Standard_NS = "mumps"
         self.precon_Standard_NS = "default"
         self.solver_ICT_1 = "gmres"
@@ -216,7 +219,7 @@ class TwoPhaseFlows():
 
         #Compute the stabilization term
         r = ((phi - phi_old)/dt + inner(u_old, grad(phi)))* \
-            scaling*h/ufl.Max(2.0*norm(u_old,'L2'),1.0e-3/h)*inner(u_old, grad(l))*dx
+            scaling*h/ufl.Max(2.0*sqrt(inner(u_old, u_old)),1.0e-3/h)*inner(u_old, grad(l))*dx
         return r
 
 
@@ -297,6 +300,24 @@ class TwoPhaseFlows():
                        + eps_reinit*inner(grad(phi_intermediate), n_gamma)*inner(grad(l), n_gamma)*dx
 
 
+    """Weak form normal advection"""
+    def Normal_Advection_weak_form(self, n, n_test, n_old, dt, u_old, dn):
+        #Check correctness of types
+        if(not isinstance(n, Function)):
+            raise ValueError("n must be an instance of Function")
+        if(not isinstance(n_old, Function)):
+            raise ValueError("n_old must be an instance of Function")
+        if(not isinstance(u_old, Function)):
+            raise ValueError("u_old must be an instance of Function")
+
+        #Save variational formulation
+        self.F3 = inner((n - n_old)/dt, n_test)*dx \
+                + inner(n, u_old)*inner(dot(n, nabla_grad(n)), n_test)*dx \
+                - inner(n, u_old)*div(n_test)*dx \
+                - inner(dot(grad(inner(n, u_old)), outer(n, n)), n_test)*dx
+        self.J  = derivative(self.F3, n, dn)
+
+
     """Build and solve the system for Level set transport"""
     def solve_Levelset_system(self, phi_curr):
         #Assemble matrix and right-hand side
@@ -359,6 +380,15 @@ class TwoPhaseFlows():
 
         #Assign the reinitialized level-set to the current solution
         phi_curr.assign(phi_intermediate)
+
+
+    """Build and solve the system for Level set reinitialization (conservative)"""
+    def solve_normal_advect(self, n):
+        #Solve the system
+        solve(self.F3 == 0, n, J = self.J, \
+              solver_parameters={"newton_solver": {"linear_solver": self.solver_normal, "preconditioner": self.precon_normal,\
+                                 "maximum_iterations": 200, "absolute_tolerance": 1e-6, "relative_tolerance": 1e-4}}, \
+              form_compiler_parameters={"optimize": True, "representation": "uflacs"})
 
 
     """Build and solve the system for Navier-Stokes part using Standard method"""
