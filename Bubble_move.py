@@ -230,8 +230,7 @@ class BubbleMove(TwoPhaseFlows):
                 raise  ValueError("Non-Positive value for the interface thickness")
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(np.minimum(0.00001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
-                                                                     #and so a very small step is needed
+            self.dt_reinit = Constant(0.1*hmin) #Taken from original paper of reinitialization
 
             #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
