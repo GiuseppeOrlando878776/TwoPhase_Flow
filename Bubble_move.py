@@ -235,11 +235,10 @@ class BubbleMove(TwoPhaseFlows):
         if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
             f = Expression("sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)) - r",
                             A = center[0], B = center[1], r = radius, degree = 2)
-            self.phi_old.assign(interpolate(f,self.Q))
         elif(self.reinit_method == 'Conservative'):
             f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
                             A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
-            self.phi_old.assign(interpolate(f, self.Q))
+        self.phi_old.assign(interpolate(f, self.Q))
 
 
     """Assemble boundary condition"""
@@ -428,6 +427,6 @@ class BubbleMove(TwoPhaseFlows):
 
         #Save the final state
         if(self.n_iter % self.save_iters != 0):
-            self.vtkfile_u << (self.u_old, self.t)
+            self.vtkfile_u << (self.u_old, self.t_end)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
-            self.vtkfile_rho << (self.rho_interp, self.t)
+            self.vtkfile_rho << (self.rho_interp, self.t_end)
