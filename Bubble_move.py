@@ -230,7 +230,8 @@ class BubbleMove(TwoPhaseFlows):
                 raise  ValueError("Non-Positive value for the interface thickness")
             self.gamma_reinit = Constant(hmin)
             self.beta_reinit = Constant(0.0625*hmin)
-            self.dt_reinit = Constant(0.1*hmin) #Taken from original paper of reinitialization
+            self.dt_reinit = Constant(np.minimum(0.00001, 0.5*hmin)) #We choose an explicit treatment to keep the linearity
+                                                                     #and so a very small step is needed
 
             #Prepare useful dictionary in order to avoid too many ifs:
             #Dictionary for reinitialization weak form
@@ -536,36 +537,10 @@ class BubbleMove(TwoPhaseFlows):
             elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
                 self.tmp = 1.0*(self.phi_vec < 0.0)
             self.levset.vector().set_local(self.tmp)
-            self.vtkfile_phi << (self.levset, self.t)
-            self.vtkfile_u << (self.u_old, self.t)
+            self.vtkfile_phi << (self.levset, self.t_end)
+            self.vtkfile_u << (self.u_old, self.t_end)
             if(self.LS_sol_method == 'Continuous'):
                 self.rho_interp.assign(project(self.rho(self.phi_old_cont,self.eps), self.Q))
             elif(self.LS_sol_method == 'DG'):
                 self.rho_interp.assign(project(self.rho(self.phi_old_cont,self.eps), self.Qcont))
-            self.vtkfile_rho << (self.rho_interp, self.t)
-            #Compute benchamrk quantities
-            self.timeseries = open(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/benchmark_series.dat','wb')
-            if(self.reinit_method == 'Conservative'):
-                Vol = assemble(conditional(lt(self.phi_old_cont, 0.5), 1.0, 0.0)*dx)
-                Pa = 2.0*sqrt(np.pi*Vol)
-                Pb = assemble(mgrad(self.phi_old_cont)*self.Appr_Delta(self.phi_old_cont,self.eps)*dx)
-                Chi = Pa/Pb
-                Xc = assemble(Expression("x[0]", degree = 1)*(conditional(lt(self.phi_old_cont, 0.5), 1.0, 0.0))*dx)/Vol
-                Yc = assemble(Expression("x[1]", degree = 1)*(conditional(lt(self.phi_old_cont, 0.5), 1.0, 0.0))*dx)/Vol
-                Uc = assemble(inner(self.u_old,self.e1)*(conditional(lt(self.phi_old_cont, 0.5), 1.0, 0.0))*dx)/Vol
-                Vc = assemble(inner(self.u_old,self.e2)*(conditional(lt(self.phi_old_cont, 0.5), 1.0, 0.0))*dx)/Vol
-                timeseries_vec = [self.t*self.t0,Vol,Chi,Xc,Yc,Uc,Vc]
-            elif(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-                Vol = assemble(conditional(lt(self.phi_old_cont, 0.0), 1.0, 0.0)*dx)
-                Pa = 2.0*sqrt(np.pi*Vol)
-                Pb = assemble(mgrad(self.phi_old_cont)*self.Appr_Delta(self.phi_old_cont,self.eps)*dx)
-                Chi = Pa/Pb
-                Xc = assemble(Expression("x[0]", degree = 1)*(conditional(lt(self.phi_old_cont, 0.0), 1.0, 0.0))*dx)/Vol
-                Yc = assemble(Expression("x[1]", degree = 1)*(conditional(lt(self.phi_old_cont, 0.0), 1.0, 0.0))*dx)/Vol
-                Uc = assemble(inner(self.u_old,self.e1)*(conditional(lt(self.phi_old_cont, 0.0), 1.0, 0.0))*dx)/Vol
-                Vc = assemble(inner(self.u_old,self.e2)*(conditional(lt(self.phi_old_cont, 0.0), 1.0, 0.0))*dx)/Vol
-                L2_gradphi = sqrt(assemble(inner(grad(self.phi_old_cont),grad(self.phi_old_cont))*dx)/(self.base*self.height))
-                timeseries_vec = [self.t*self.t0,Vol,Chi,Xc,Yc,Uc,Vc,L2_gradphi]
-            if(self.rank == 0):
-                np.savetxt(self.timeseries, timeseries_vec)
-            self.timeseries.close() #Close for safety in case some system fails to reach convergence
+            self.vtkfile_rho << (self.rho_interp, self.t_end)

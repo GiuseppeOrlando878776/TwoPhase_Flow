@@ -301,9 +301,10 @@ class TwoPhaseFlows():
             raise ValueError("phi_curr must be an instance of Function")
 
         #Declare weak formulation
-        self.a1_reinit = (phi/dt_reinit)*l*dx + beta_reinit*inner(grad(phi), grad(l))*dx
+        self.a1_reinit = (phi/dt_reinit)*l*dx
         self.L1_reinit = (phi0/dt_reinit)*l*dx \
                        + signp(phi_curr, gamma_reinit)*(1.0 - mgrad(phi0))*l*dx \
+                       - beta_reinit*inner(grad(phi0), grad(l))*dx
 
         #Save the matrix (that will not change during computations) and declare vector
         self.A1_reinit = assemble(self.a1_reinit)
@@ -384,8 +385,8 @@ class TwoPhaseFlows():
         #Solve the level-set system
         solve(self.A1, phi_curr.vector(), self.b1, self.solver_Levset, self.precon_Levset)
         tmp = phi_curr.vector().get_local()
-        #np.clip(tmp, -xi, 1.0 + xi)
-        #phi_curr.vector().set_local(tmp)
+        np.clip(tmp, -xi, 1.0 + xi)
+        phi_curr.vector().set_local(tmp)
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
@@ -452,7 +453,7 @@ class TwoPhaseFlows():
         assemble(self.L2, tensor = self.b2)
 
         # Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
@@ -467,7 +468,7 @@ class TwoPhaseFlows():
         assemble(self.L2, tensor = self.b2)
 
         #Apply boundary conditions
-        for bc in self.bcs:
+        for bc in bcs:
             bc.apply(self.A2)
             bc.apply(self.b2)
 
