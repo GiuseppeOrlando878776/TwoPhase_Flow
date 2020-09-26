@@ -410,7 +410,15 @@ class BubbleMove(TwoPhaseFlows):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                     if(self.reinit_method == 'Conservative'):
-                        self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
+                        if(self.normal_method == 'Laplace_Beltrami'):
+                            self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
+                        elif(self.normal_method == 'Evolution'):
+                            begin(int(LogLevel.INFO) + 1,"Solving normal advection")
+                            self.solve_normal_advect(self.n) #Compute normal vector
+                            self.n.assign(project(self.n/sqrt(inner(self.n, self.n)), self.Q2)) #Impose unit norm
+                            end()
+                            #Prepare to next step assign previous-step solution
+                            self.n_old.assign(self.n)
                         if(self.n_iter % self.save_iters == 0):
                             self.vtkfile_n << (self.n, self.t)
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
@@ -423,7 +431,7 @@ class BubbleMove(TwoPhaseFlows):
             if(self.sigma > DOLFIN_EPS):
                 if(self.normal_method == 'Laplace_Beltrami'):
                     self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
-                elif(self.normal_method == 'Evolution'):
+                elif(self.normal_method == 'Evolution'  and (self.reinit_method != 'Conservative' or self.n_iter % reinit_iters != 0)):
                     #Solve Normal equation: the velocity must be the same employed for the level-set advection
                     #and so we solve here this equation
                     begin(int(LogLevel.INFO) + 1,"Solving normal advection")
