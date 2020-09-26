@@ -249,7 +249,10 @@ class BubbleMove(TwoPhaseFlows):
                             A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
         self.phi_old.assign(interpolate(f,self.Q))
         if(self.normal_method == 'Evolution'):
-            self.n_old.assign(project(grad(self.phi_old)/mgrad(self.phi_old), self.Q2))
+            n_exact = Expression(("(x[0] - A)/sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B) + eps)",\
+                                  "(x[1] - B)/sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B) + eps)"), \
+                                  A = center[0], B = center[1], eps = DOLFIN_EPS, degree = 2)
+            self.n_old.assign(interpolate(n_exact, self.Q2))
 
 
     """Assemble boundary condition"""
