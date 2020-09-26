@@ -48,7 +48,7 @@ class BubbleMove(TwoPhaseFlows):
 
         #Check correctness of data read
         if(self.rho1 < DOLFIN_EPS or self.rho2 < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or self.mu2 < DOLFIN_EPS \
-           or self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.g < DOLFIN_EPS or self.sigma < DOLFIN_EPS):
+           or self.dt < DOLFIN_EPS or self.t_end < DOLFIN_EPS or self.g < 0.0 or self.sigma < 0.0):
             raise ValueError("Invalid parameter read in the configuration file (read a non positive value for some parameters)")
         if(self.dt > self.t_end):
             raise ValueError("Time-step greater than final time")
@@ -170,9 +170,9 @@ class BubbleMove(TwoPhaseFlows):
         #Define function to store the normal
         self.n = Function(self.Q2)
         if(self.normal_method == 'Evolution'):
-            self.n_old  = Function(self.Q2)
-            self.n_test = TestFunction(self.Q2)
-            self.dn     = TrialFunction(self.Q2)
+            self.n_old   = Function(self.Q2)
+            self.n_test  = TestFunction(self.Q2)
+            self.n_trial = TrialFunction(self.Q2)
 
         #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
@@ -311,7 +311,7 @@ class BubbleMove(TwoPhaseFlows):
 
             #Set variotional problem for normal advection (if needed)
             if(self.normal_method == 'Evolution'):
-                self.Normal_Advection_weak_form(self.n, self.n_test, self.n_old, self.DT, self.u_old, self.dn)
+                self.Normal_Advection_weak_form(self.n_trial, self.n_test, self.n_old, self.DT, self.u_old)
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
