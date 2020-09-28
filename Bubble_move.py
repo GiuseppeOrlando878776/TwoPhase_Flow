@@ -80,17 +80,6 @@ class BubbleMove(TwoPhaseFlows):
         if(self.normal_method not in self.normal_dict):
             raise ValueError("Reinitialization method not available")
 
-        #Set more adequate solvers in case of one core execution
-        if(MPI.size(self.comm) == 1):
-            if(self.reinit_method == 'Non_Conservative_Hyperbolic'):
-                self.solver_recon = "cg"
-                self.precon_recon = "icc"
-            if(self.NS_sol_method == 'Standard'):
-                self.solver_Standard_NS = "umfpack"
-            elif(self.NS_sol_method == 'ICT'):
-                self.solver_ICT_3 = "cg"
-                self.precon_ICT_3 = "icc"
-
         #Prepare useful variables for stabilization
         self.switcher_parameter = {self.stab_method: None}
         if(self.stab_method == 'IP'):
