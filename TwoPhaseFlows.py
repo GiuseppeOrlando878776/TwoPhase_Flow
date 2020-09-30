@@ -12,6 +12,23 @@ class TwoPhaseFlows():
         self.reinit_method_dict = {'Non_Conservative_Hyperbolic', 'Conservative'}
         self.normal_dict = {'Laplace_Beltrami', 'Evolution'}
 
+        #Save solvers and preconditioners settings; in this way we prepare ourselves
+        #in case the option to pass it through configuration file will be added in a future version
+        self.solver_Levset = "petsc"
+        self.precon_Levset = "default"
+        self.solver_recon = "petsc"
+        self.precon_recon = "default"
+        self.solver_normal = "petsc"
+        self.precon_normal = "default"
+        self.solver_Standard_NS = "petsc"
+        self.precon_Standard_NS = "default"
+        self.solver_ICT_1 = "petsc"
+        self.precon_ICT_1 = "default"
+        self.solver_ICT_2 = "petsc"
+        self.precon_ICT_2 = "default"
+        self.solver_ICT_3 = "petsc"
+        self.precon_ICT_3 = "default"
+
         #Declare useful constant vectors
         self.e1 = Constant((1.0, 0.0))
         self.e2 = Constant((0.0, 1.0))
@@ -129,9 +146,12 @@ class TwoPhaseFlows():
         else:
             raise ValueError("Wrong number of arguments in ICT-Step 1 weak form setting (check function call)")
 
-        #Save corresponding weak form
+        #Save corresponding weak form and declare suitable matrix and vector
         self.a2 = lhs(F2)
         self.L2 = rhs(F2)
+
+        self.A2 = PETScMatrix()
+        self.b2 = PETScVector()
 
 
     """Weak formulation for pressure correction"""
@@ -150,6 +170,10 @@ class TwoPhaseFlows():
         self.a2_bis = (1.0/rho(phi_curr, eps))*inner(grad(p), grad(q))*dx
         self.L2_bis = (1.0/rho(phi_curr, eps))*inner(grad(p_old), grad(q))*dx - \
                       (1.0/dt)*div(u_curr)*q*dx
+
+        #Declare matrix and vector for the linear system solution
+        self.A2_bis = PETScMatrix()
+        self.b2_bis = PETScVector()
 
 
     """Weak formulation for velocity projection"""
@@ -170,6 +194,10 @@ class TwoPhaseFlows():
         self.a2_tris = inner(u, v)*dx
         self.L2_tris = inner(u_curr, v)*dx - \
                        dt*inner(grad(p_curr - p_old), v)/rho(phi_curr, eps)*dx
+
+        #Save matrix (that will not change during the computations) and declare vector
+        self.A2_tris = assemble(self.a2_tris)
+        self.b2_tris = PETScVector()
 
 
     """Interior penalty method"""
@@ -232,6 +260,10 @@ class TwoPhaseFlows():
         self.a1 = lhs(F1)
         self.L1 = rhs(F1)
 
+        #Declare matrix and vector for solving
+        self.A1 = PETScMatrix()
+        self.b1 = PETScVector()
+
 
     """Weak form non-conservative reinitialization (hyperbolic version)"""
     def NCLSM_hyperbolic_weak_form(self, phi, l, phi0, phi_curr, dt_reinit, gamma_reinit, beta_reinit):
@@ -284,11 +316,18 @@ class TwoPhaseFlows():
         self.a3 = lhs(F3)
         self.L3 = rhs(F3)
 
+        self.A3 = PETScMatrix()
+        self.b3 = PETScVector()
+
 
     """Build and solve the system for Level set transport"""
     def solve_Levelset_system(self, phi_curr):
+        #Assemble matrix and right-hand side
+        assemble(self.a1, tensor = self.A1)
+        assemble(self.L1, tensor = self.b1)
+
         #Solve the level-set system
-        solve(self.a1 == self.L1, phi_curr)
+        solve(self.A1, phi_curr.vector(), self.b1, self.solver_Levset, self.precon_Levset)
 
 
     """Build and solve the system for Level set hyperbolic reinitialization (non-conservative)"""
@@ -327,7 +366,10 @@ class TwoPhaseFlows():
         #Start the loop
         for n in range(n_subiters):
             #Solve the system
-            solve(self.F1_reinit == 0, phi_intermediate)
+            solve(self.F1_reinit == 0, phi_intermediate, \
+                  solver_parameters={"newton_solver": {"linear_solver": self.solver_recon, "preconditioner": self.precon_recon,\
+                                     "maximum_iterations": 20, "absolute_tolerance": 1e-8, "relative_tolerance": 1e-6}}, \
+                  form_compiler_parameters={"optimize": True})
 
             #Check if convergence has been reached
             error = (((phi_intermediate - phi0)/dt_reinit)**2)*dx
@@ -344,8 +386,12 @@ class TwoPhaseFlows():
 
     """Build and solve the system for Level set reinitialization (conservative)"""
     def solve_normal_advect(self, n):
+        #Assemble matrix and right-hand side
+        assemble(self.a3, tensor = self.A3)
+        assemble(self.L3, tensor = self.b3)
+
         #Solve the system
-        solve(self.a3 == self.L3,  n)
+        solve(self.A3, n.vector(), self.b3, self.solver_normal, self.precon_normal)
 
 
     """Build and solve the system for Navier-Stokes part using Standard method"""
@@ -365,11 +411,23 @@ class TwoPhaseFlows():
 
     """Build and solve the system for Navier-Stokes part using ICT method"""
     def solve_ICT_NS_systems(self, bcs, u_curr, p_curr):
-        #Solve the first system
-        solve(self.a2 == self.L2, u_curr, bcs = bcs)
+        #Assemble matrix and right-hand side for the first step
+        assemble(self.a2, tensor = self.A2)
+        assemble(self.L2, tensor = self.b2)
 
-        #Solve the second system
-        solve(self.a2_bis == self.L2_bis, p_curr)
+        #Apply boundary conditions
+        for bc in bcs:
+            bc.apply(self.A2)
+            bc.apply(self.b2)
+
+        #Solve the first system
+        solve(self.A2, u_curr.vector(), self.b2, self.solver_ICT_1, self.precon_ICT_1)
+
+        #Assemble and solve the second system
+        assemble(self.a2_bis, tensor = self.A2_bis)
+        assemble(self.L2_bis, tensor = self.b2_bis)
+        solve(self.A2_bis, p_curr.vector(), self.b2_bis, self.solver_ICT_2, self.precon_ICT_2)
 
         #Assemble and solve the third system
-        solve(self.a2_tris == self.L2_tris, u_curr)
+        assemble(self.L2_tris, tensor = self.b2_tris)
+        solve(self.A2_tris, u_curr.vector(), self.b2_tris, self.solver_ICT_3, self.precon_ICT_3)
