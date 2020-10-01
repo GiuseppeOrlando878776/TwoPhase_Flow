@@ -343,6 +343,7 @@ class BubbleMove(TwoPhaseFlows):
             self.vtkfile_u << (self.u_old, self.t)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
+            self.vtkfile_phi << (self.phi_old, self.t)
 
         #Compute benchamrk quantities
         if(self.reinit_method == 'Conservative'):
@@ -395,6 +396,7 @@ class BubbleMove(TwoPhaseFlows):
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
         self.vtkfile_n = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/n.pvd')
+        self.vtkfile_phi = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/phi.pvd')
 
         #File for benchamrk comparisons
         self.timeseries = open(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/benchmark_series.dat','wb')
@@ -429,6 +431,11 @@ class BubbleMove(TwoPhaseFlows):
                         if(self.n_iter % self.save_iters == 0):
                             self.vtkfile_n << (self.n, self.t)
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
+                    #Clip in case of one processor
+                    if(MPI.size(self.comm) == 1 and self.normal_method == 'Evolution'):
+                        tmp = self.phi_curr.vector().get_local()
+                        np.clip(tmp, 0.0, 1.0, out = tmp)
+                        self.phi_curr.vector().set_local(tmp)
                     end()
                 except Exception as e:
                     if(self.rank == 0):
@@ -447,6 +454,11 @@ class BubbleMove(TwoPhaseFlows):
                     end()
                     #Prepare to next step assign previous-step solution
                     self.n_old.assign(self.n)
+                    #Clip in case of one processor
+                    if(MPI.size(self.comm) == 1):
+                        tmp = self.phi_curr.vector().get_local()
+                        np.clip(tmp, 0.0, 1.0, out = tmp)
+                        self.phi_curr.vector().set_local(tmp)
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
@@ -476,3 +488,4 @@ class BubbleMove(TwoPhaseFlows):
             self.vtkfile_u << (self.u_old, self.t_end)
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t_end)
+            self.vtkfile_phi << (self.phi_old, self.t_end)

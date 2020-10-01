@@ -14,19 +14,19 @@ class TwoPhaseFlows():
 
         #Save solvers and preconditioners settings; in this way we prepare ourselves
         #in case the option to pass it through configuration file will be added in a future version
-        self.solver_Levset = "petsc"
+        self.solver_Levset = "mumps"
         self.precon_Levset = "default"
-        self.solver_recon = "petsc"
+        self.solver_recon = "mumps"
         self.precon_recon = "default"
-        self.solver_normal = "petsc"
+        self.solver_normal = "mumps"
         self.precon_normal = "default"
-        self.solver_Standard_NS = "petsc"
+        self.solver_Standard_NS = "mumps"
         self.precon_Standard_NS = "default"
-        self.solver_ICT_1 = "petsc"
+        self.solver_ICT_1 = "mumps"
         self.precon_ICT_1 = "default"
-        self.solver_ICT_2 = "petsc"
+        self.solver_ICT_2 = "mumps"
         self.precon_ICT_2 = "default"
-        self.solver_ICT_3 = "petsc"
+        self.solver_ICT_3 = "mumps"
         self.precon_ICT_3 = "default"
 
         #Declare useful constant vectors
