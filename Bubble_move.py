@@ -101,14 +101,14 @@ class BubbleMove(TwoPhaseFlows):
         #Prepare useful variables for stabilization
         self.switcher_parameter = {self.stab_method: None}
         if(self.stab_method == 'IP'):
-            self.alpha = self.Param["Stabilization_Parameter"]
+            self.alpha = Constant(self.Param["Stabilization_Parameter"])
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['IP'] = self.alpha
             #Share interior facets
             if(MPI.size(self.comm) > 1):
                 parameters["ghost_mode"] = "shared_facet"
         elif(self.stab_method == 'SUPG'):
-            self.scaling = self.Param["Stabilization_Parameter"]
+            self.scaling = Constant(self.Param["Stabilization_Parameter"])
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['SUPG'] = self.scaling
 
@@ -415,7 +415,7 @@ class BubbleMove(TwoPhaseFlows):
             end()
 
             #Solve Level-set reinit
-            if(self.n_iter % reinit_iters == 0):
+            if(reinit_iters != 0 and self.n_iter % reinit_iters == 0):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                     if(self.reinit_method == 'Conservative'):
@@ -445,7 +445,8 @@ class BubbleMove(TwoPhaseFlows):
             if(self.sigma > DOLFIN_EPS):
                 if(self.normal_method == 'Laplace_Beltrami'):
                     self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
-                elif(self.normal_method == 'Evolution'  and (self.reinit_method != 'Conservative' or self.n_iter % reinit_iters != 0)):
+                elif(self.normal_method == 'Evolution'  and (self.reinit_method != 'Conservative' or reinit_iters == 0 or  \
+                                                             self.n_iter % reinit_iters != 0)):
                     #Solve Normal equation: the velocity must be the same employed for the level-set advection
                     #and so we solve here this equation
                     begin(int(LogLevel.INFO) + 1,"Solving normal advection")
