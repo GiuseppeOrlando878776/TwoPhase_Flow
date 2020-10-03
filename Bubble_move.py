@@ -89,19 +89,20 @@ class BubbleMove(TwoPhaseFlows):
         #Prepare useful variables for stabilization
         self.switcher_parameter = {self.stab_method: None}
         if(self.stab_method == 'IP'):
-            self.alpha = self.Param["Stabilization_Parameter"]
+            self.alpha = Constant(self.Param["Stabilization_Parameter"])
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['IP'] = self.alpha
             #Share interior facets
             if(MPI.size(self.comm) > 1):
                 parameters["ghost_mode"] = "shared_facet"
         elif(self.stab_method == 'SUPG'):
-            self.scaling = self.Param["Stabilization_Parameter"]
+            self.scaling = Constant(self.Param["Stabilization_Parameter"])
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['SUPG'] = self.scaling
 
         #Convert useful constants to constant FENICS functions
-        self.DT = Constant(self.dt)
+        self.DT   = Constant(self.dt)
+        self.g    = Constant(self.g)
 
         #Set parameter for standard output
         set_log_level(self.Param["Log_Level"] if self.rank == 0 else 1000)

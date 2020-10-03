@@ -51,7 +51,7 @@ class TwoPhaseFlows():
             sigma = kwargs.get('sigma')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
                + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
+               + Constant(2.0)*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
                - p*div(v)*dx \
                + div(u)*q*dx \
                + g*inner(rho(phi_curr, eps)*self.e2, v)*dx
@@ -60,7 +60,7 @@ class TwoPhaseFlows():
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += sigma*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += Constant(sigma)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         elif(len(kwargs) == 3):
             assert 'Re' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Re' not found (check function call)"
             assert 'Fr' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Fr' not found (check function call)"
@@ -70,16 +70,16 @@ class TwoPhaseFlows():
             We = kwargs.get('We')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
                + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0/Re*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
+               + Constant(2.0/Re)*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
                - p*div(v)*dx \
                + div(u)*q*dx \
-               + 1.0/(Fr*Fr)*inner(rho(phi_curr, eps)*self.e2, v)*dx
+               + Constant(1.0/(Fr*Fr))*inner(rho(phi_curr, eps)*self.e2, v)*dx
             if(We > DOLFIN_EPS):
                 if(not callable(CDelta)):
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += (1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += Constant(1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         else:
             raise ValueError("Wrong number of arguments in Standard NS weak form setting (check function call)")
 
@@ -113,7 +113,7 @@ class TwoPhaseFlows():
             sigma = kwargs.get('sigma')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
                + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
+               + Constant(2.0)*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
                - p_old*div(v)*dx \
                + g*inner(rho(phi_curr, eps)*self.e2, v)*dx
             if(sigma > DOLFIN_EPS):
@@ -121,7 +121,7 @@ class TwoPhaseFlows():
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += sigma*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += Constant(sigma)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         elif(len(kwargs) == 3):
             assert 'Re' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Re' not found (check function call)"
             assert 'Fr' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Fr' not found (check function call)"
@@ -131,15 +131,15 @@ class TwoPhaseFlows():
             We = kwargs.get('We')
             F2 = (1.0/dt)*inner(rho(phi_curr, eps)*u - rho(phi_old, eps)*u_old, v)*dx \
                + inner(rho(phi_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + 2.0/Re*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
+               + Constant(2.0/Re)*inner(mu(phi_curr, eps)*D(u), D(v))*dx \
                - p_old*div(v)*dx \
-               + 1.0/(Fr*Fr)*inner(rho(phi_curr, eps)*self.e2, v)*dx
+               + Constant(1.0/(Fr*Fr))*inner(rho(phi_curr, eps)*self.e2, v)*dx
             if(We > DOLFIN_EPS):
                 if(not callable(CDelta)):
                     raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += (1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
+                F2 += Constant(1.0/We)*mgrad(phi_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(phi_curr, eps)*dx
         else:
             raise ValueError("Wrong number of arguments in ICT-Step 1 weak form setting (check function call)")
 
