@@ -24,6 +24,7 @@ class My_Parameters:
         self.Param.add("Normal_Computation", 'Laplace_Beltrami')
         self.Param.add("Interface_Thickness", 0.025)
         self.Param.add("Stabilization_Parameter", 0.01)
+        self.Param.add("Stabilization_Parameter_Normal", 0.01)
         self.Param.add("Reference_Dimensionalization", 'Dimensional')
         self.Param.add("Settings_Type", 'Physical')
         self.Param.add("Maximum_subiters_recon", 10)

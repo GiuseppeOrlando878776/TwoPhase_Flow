@@ -111,6 +111,8 @@ class BubbleMove(TwoPhaseFlows):
             self.scaling = Constant(self.Param["Stabilization_Parameter"])
             #Auxiliary dictionary in order to set the proper parameter for stabilization
             self.switcher_parameter['SUPG'] = self.scaling
+        if(self.normal_method == 'Evolution'):
+            self.parameter_normal = Constant(self.Param["Stabilization_Parameter_Normal"])
 
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
@@ -150,7 +152,6 @@ class BubbleMove(TwoPhaseFlows):
         if(self.NS_sol_method == 'Standard'):
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
         self.Q  = FunctionSpace(self.mesh, "CG", 2)
-        self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
         if(self.NS_sol_method == 'Standard'):
@@ -175,11 +176,14 @@ class BubbleMove(TwoPhaseFlows):
         self.phi_old  = Function(self.Q)
 
         #Define function to store the normal
-        self.n = Function(self.Q2)
-        if(self.normal_method == 'Evolution'):
+        if(self.normal_method == 'Laplace_Beltrami'):
+            self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
+        elif(self.normal_method == 'Evolution'):
+            self.Q2      = VectorFunctionSpace(self.mesh, "CG", 2)
             self.n_old   = Function(self.Q2)
             self.n_test  = TestFunction(self.Q2)
             self.n_trial = TrialFunction(self.Q2)
+        self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
@@ -318,7 +322,7 @@ class BubbleMove(TwoPhaseFlows):
 
             #Set variotional problem for normal advection (if needed)
             if(self.normal_method == 'Evolution'):
-                self.Normal_Advection_weak_form(self.n_trial, self.n_test, self.n_old, self.DT, self.u_old)
+                self.Normal_Advection_weak_form(self.n_trial, self.n_test, self.n_old, self.DT, self.u_old, self.mesh, self.parameter_normal)
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
@@ -431,11 +435,6 @@ class BubbleMove(TwoPhaseFlows):
                         if(self.n_iter % self.save_iters == 0):
                             self.vtkfile_n << (self.n, self.t)
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
-                    #Clip in case of one processor
-                    if(MPI.size(self.comm) == 1 and self.normal_method == 'Evolution'):
-                        tmp = self.phi_curr.vector().get_local()
-                        np.clip(tmp, 0.0, 1.0, out = tmp)
-                        self.phi_curr.vector().set_local(tmp)
                     end()
                 except Exception as e:
                     if(self.rank == 0):
@@ -455,11 +454,6 @@ class BubbleMove(TwoPhaseFlows):
                     end()
                     #Prepare to next step assign previous-step solution
                     self.n_old.assign(self.n)
-                    #Clip in case of one processor
-                    if(MPI.size(self.comm) == 1):
-                        tmp = self.phi_curr.vector().get_local()
-                        np.clip(tmp, 0.0, 1.0, out = tmp)
-                        self.phi_curr.vector().set_local(tmp)
 
             #Solve Navier-Stokes
             begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")

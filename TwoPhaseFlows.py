@@ -301,7 +301,7 @@ class TwoPhaseFlows():
 
 
     """Weak form normal advection"""
-    def Normal_Advection_weak_form(self, n_trial, n_test, n_old, dt, u_old):
+    def Normal_Advection_weak_form(self, n_trial, n_test, n_old, dt, u_old, mesh, scaling):
         #Check correctness of types
         if(not isinstance(n_old, Function)):
             raise ValueError("n_old must be an instance of Function")
@@ -313,6 +313,14 @@ class TwoPhaseFlows():
            + inner(n_old, u_old)*inner(dot(n_old, nabla_grad(n_trial)), n_test)*dx \
            - inner(n_old, u_old)*div(n_test)*dx \
            - inner(dot(grad(inner(n_old, u_old)), outer(n_trial, n_old)), n_test)*dx
+        #Add the SUPG stabilization
+        h = CellDiameter(mesh)
+        F3 += scaling*h/ufl.Max(2.0*sqrt(inner(u_old, u_old)),1.0e-3/h)* \
+              inner((n_trial - n_old)/dt + inner(n_old, u_old)*dot(n_old, nabla_grad(n_trial)) + \
+                    grad(inner(n_old, u_old)) - dot(grad(inner(n_old, u_old)), outer(n_trial, n_old)), \
+                    inner(n_old, u_old)*dot(n_old, nabla_grad(n_test)) + 0.5*div(inner(n_old, u_old)*n_old)*n_test)*dx
+
+        #Save left and right-hand sides and declare matrix and vector
         self.a3 = lhs(F3)
         self.L3 = rhs(F3)
 
