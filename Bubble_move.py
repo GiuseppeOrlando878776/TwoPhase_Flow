@@ -282,6 +282,9 @@ class BubbleMove(TwoPhaseFlows):
             #Useful dictionaries for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'ICT': self.solve_ICT_NS_systems}
             self.switcher_arguments_NS_solve = {'ICT': (self.bcs, self.u_curr, self.p_curr)}
+        if(self.normal_method == 'Evolution'):
+            self.bcs_normal = [DirichletBC(self.Q2.sub(1), Constant(0.0), NoSlip_Boundary(self.height)), \
+                               DirichletBC(self.Q2.sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
 
 
     """Auxiliary function to select proper Heavised approximation"""
@@ -427,7 +430,7 @@ class BubbleMove(TwoPhaseFlows):
                             self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
                         elif(self.normal_method == 'Evolution'):
                             begin(int(LogLevel.INFO) + 1,"Solving normal advection")
-                            self.solve_normal_advect(self.n) #Compute normal vector
+                            self.solve_normal_advect(self.n, self.bcs_normal) #Compute normal vector
                             self.n.assign(project(self.n/sqrt(inner(self.n, self.n)), self.Q2)) #Impose unit norm
                             end()
                             #Prepare to next step assign previous-step solution
@@ -449,7 +452,7 @@ class BubbleMove(TwoPhaseFlows):
                     #Solve Normal equation: the velocity must be the same employed for the level-set advection
                     #and so we solve here this equation
                     begin(int(LogLevel.INFO) + 1,"Solving normal advection")
-                    self.solve_normal_advect(self.n)
+                    self.solve_normal_advect(self.n, self.bcs_normal)
                     self.n.assign(project(self.n/sqrt(inner(self.n, self.n)), self.Q2))
                     end()
                     #Prepare to next step assign previous-step solution

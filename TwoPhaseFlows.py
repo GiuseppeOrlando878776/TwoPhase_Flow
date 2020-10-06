@@ -393,10 +393,15 @@ class TwoPhaseFlows():
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
-    def solve_normal_advect(self, n):
+    def solve_normal_advect(self, n, bcs):
         #Assemble matrix and right-hand side
         assemble(self.a3, tensor = self.A3)
         assemble(self.L3, tensor = self.b3)
+
+        #Apply boundary conditions
+        for bc in bcs:
+            bc.apply(self.A3)
+            bc.apply(self.b3)
 
         #Solve the system
         solve(self.A3, n.vector(), self.b3, self.solver_normal, self.precon_normal)
