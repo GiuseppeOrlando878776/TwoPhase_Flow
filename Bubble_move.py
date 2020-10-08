@@ -182,7 +182,7 @@ class BubbleMove(TwoPhaseFlows):
             self.Q2      = VectorFunctionSpace(self.mesh, "CG", 2)
             self.n_old   = Function(self.Q2)
             self.n_test  = TestFunction(self.Q2)
-            self.n_trial = TrialFunction(self.Q2)
+            self.dn      = TrialFunction(self.Q2)
         self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
@@ -325,7 +325,8 @@ class BubbleMove(TwoPhaseFlows):
 
             #Set variotional problem for normal advection (if needed)
             if(self.normal_method == 'Evolution'):
-                self.Normal_Advection_weak_form(self.n_trial, self.n_test, self.n_old, self.DT, self.u_old, self.mesh, self.parameter_normal)
+                self.Normal_Advection_weak_form(self.n, self.n_test, self.n_old, self.DT, self.u_old, self.dn, \
+                                                self.mesh, self.parameter_normal)
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
