@@ -282,9 +282,6 @@ class BubbleMove(TwoPhaseFlows):
             #Useful dictionaries for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'ICT': self.solve_ICT_NS_systems}
             self.switcher_arguments_NS_solve = {'ICT': (self.bcs, self.u_curr, self.p_curr)}
-        if(self.normal_method == 'Evolution'):
-            self.bcs_normal = [DirichletBC(self.Q2.sub(1), Constant(0.0), NoSlip_Boundary(self.height)), \
-                               DirichletBC(self.Q2.sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
 
 
     """Auxiliary function to select proper Heavised approximation"""
@@ -403,7 +400,8 @@ class BubbleMove(TwoPhaseFlows):
         #File for plotting
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
-        self.vtkfile_n = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/n.pvd')
+        self.vtkfile_n_reinit = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/n_reinit.pvd')
+        self.vtkfile_n_evo = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/n_evo.pvd')
         self.vtkfile_phi = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/phi.pvd')
 
         #File for benchamrk comparisons
@@ -427,17 +425,9 @@ class BubbleMove(TwoPhaseFlows):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                     if(self.reinit_method == 'Conservative'):
-                        if(self.normal_method == 'Laplace_Beltrami'):
-                            self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
-                        elif(self.normal_method == 'Evolution'):
-                            begin(int(LogLevel.INFO) + 1,"Solving normal advection")
-                            self.solve_normal_advect(self.n, self.bcs_normal) #Compute normal vector
-                            self.n.assign(project(self.n/sqrt(inner(self.n, self.n)), self.Q2)) #Impose unit norm
-                            end()
-                            #Prepare to next step assign previous-step solution
-                            self.n_old.assign(self.n)
+                        self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
                         if(self.n_iter % self.save_iters == 0):
-                            self.vtkfile_n << (self.n, self.t)
+                            self.vtkfile_n_reinit << (self.n, self.t)
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
                     end()
                 except Exception as e:
@@ -448,14 +438,15 @@ class BubbleMove(TwoPhaseFlows):
             if(self.sigma > DOLFIN_EPS):
                 if(self.normal_method == 'Laplace_Beltrami'):
                     self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
-                elif(self.normal_method == 'Evolution'  and (self.reinit_method != 'Conservative' or reinit_iters == 0 or  \
-                                                             self.n_iter % reinit_iters != 0)):
+                elif(self.normal_method == 'Evolution'):
                     #Solve Normal equation: the velocity must be the same employed for the level-set advection
                     #and so we solve here this equation
                     begin(int(LogLevel.INFO) + 1,"Solving normal advection")
-                    self.solve_normal_advect(self.n, self.bcs_normal)
+                    self.solve_normal_advect(self.n)
                     self.n.assign(project(self.n/sqrt(inner(self.n, self.n)), self.Q2))
                     end()
+                    if(self.n_iter % self.save_iters == 0):
+                        self.vtkfile_n_evo << (self.n, self.t)
                     #Prepare to next step assign previous-step solution
                     self.n_old.assign(self.n)
 
@@ -488,3 +479,4 @@ class BubbleMove(TwoPhaseFlows):
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t_end)
             self.vtkfile_phi << (self.phi_old, self.t_end)
+            self.vtkfile_n_evo << (self.n_old, self.t_end)

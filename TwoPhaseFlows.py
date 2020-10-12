@@ -14,19 +14,19 @@ class TwoPhaseFlows():
 
         #Save solvers and preconditioners settings; in this way we prepare ourselves
         #in case the option to pass it through configuration file will be added in a future version
-        self.solver_Levset = "mumps"
+        self.solver_Levset = "gmres"
         self.precon_Levset = "default"
-        self.solver_recon = "mumps"
+        self.solver_recon = "gmres"
         self.precon_recon = "default"
-        self.solver_normal = "mumps"
+        self.solver_normal = "gmres"
         self.precon_normal = "default"
         self.solver_Standard_NS = "mumps"
         self.precon_Standard_NS = "default"
-        self.solver_ICT_1 = "mumps"
+        self.solver_ICT_1 = "gmres"
         self.precon_ICT_1 = "default"
-        self.solver_ICT_2 = "mumps"
+        self.solver_ICT_2 = "gmres"
         self.precon_ICT_2 = "default"
-        self.solver_ICT_3 = "mumps"
+        self.solver_ICT_3 = "gmres"
         self.precon_ICT_3 = "default"
 
         #Declare useful constant vectors
@@ -389,9 +389,9 @@ class TwoPhaseFlows():
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
-    def solve_normal_advect(self, n, bcs):
+    def solve_normal_advect(self, n):
         #Solve the system
-        solve(self.F3 == 0, n, bcs, J = self.J, \
+        solve(self.F3 == 0, n, J = self.J, \
               solver_parameters={"newton_solver": {"linear_solver": self.solver_normal, "preconditioner": self.precon_normal,\
                                  "maximum_iterations": 200, "absolute_tolerance": 1e-6, "relative_tolerance": 1e-4}}, \
               form_compiler_parameters={"optimize": True, "representation": "uflacs"})
