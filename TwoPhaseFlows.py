@@ -301,27 +301,31 @@ class TwoPhaseFlows():
 
 
     """Weak form normal advection"""
-    def Normal_Advection_weak_form(self, n, n_test, n_old, dt, u_old, dn, mesh, scaling):
+    def Normal_Advection_weak_form(self, n_trial, n_test, n_old, dt, u_old, mesh, scaling):
         #Check correctness of types
-        if(not isinstance(n, Function)):
-            raise ValueError("n must be an instance of Function")
         if(not isinstance(n_old, Function)):
             raise ValueError("n_old must be an instance of Function")
         if(not isinstance(u_old, Function)):
             raise ValueError("u_old must be an instance of Function")
 
         #Save variational formulation
-        self.F3 = inner((n - n_old)/dt, n_test)*dx \
-                + inner(n, u_old)*inner(dot(n, nabla_grad(n)), n_test)*dx \
-                - inner(n, u_old)*div(n_test)*dx \
-                - inner(dot(grad(inner(n, u_old)), outer(n, n)), n_test)*dx
+        F3 = inner((n_trial - n_old)/dt, n_test)*dx \
+           + inner(n_old, u_old)*inner(dot(n_old, nabla_grad(n_trial)), n_test)*dx \
+           - inner(n_old, u_old)*div(n_test)*dx \
+           - inner(dot(grad(inner(n_old, u_old)), outer(n_trial, n_old)), n_test)*dx
         #Add the SUPG stabilization
         h = CellDiameter(mesh)
-        self.F3 += scaling*h/ufl.Max(2.0*sqrt(inner(u_old, u_old)),1.0e-3/h)* \
-                   inner((n - n_old)/dt + inner(n, u_old)*dot(n, nabla_grad(n)) + \
-                   grad(inner(n, u_old)) - dot(grad(inner(n, u_old)), outer(n, n)), \
-                   inner(n, u_old)*dot(n, nabla_grad(n_test)) + 0.5*div(inner(n, u_old)*n)*n_test)*dx
-        self.J  = derivative(self.F3, n, dn)
+        F3 += scaling*h/ufl.Max(2.0*sqrt(inner(u_old, u_old)),1.0e-3/h)* \
+              inner((n_trial - n_old)/dt + inner(n_old, u_old)*dot(n_old, nabla_grad(n_trial)) + \
+                    grad(inner(n_old, u_old)) - dot(grad(inner(n_old, u_old)), outer(n_trial, n_old)), \
+                    inner(n_old, u_old)*dot(n_old, nabla_grad(n_test)) + 0.5*div(inner(n_old, u_old)*n_old)*n_test)*dx
+
+        #Save left and right-hand sides and declare matrix and vector
+        self.a3 = lhs(F3)
+        self.L3 = rhs(F3)
+
+        self.A3 = PETScMatrix()
+        self.b3 = PETScVector()
 
 
     """Build and solve the system for Level set transport"""
@@ -389,12 +393,18 @@ class TwoPhaseFlows():
 
 
     """Build and solve the system for Level set reinitialization (conservative)"""
-    def solve_normal_advect(self, n):
+    def solve_normal_advect(self, n, bcs):
+        #Assemble matrix and right-hand side
+        assemble(self.a3, tensor = self.A3)
+        assemble(self.L3, tensor = self.b3)
+
+        #Apply boundary conditions
+        for bc in bcs:
+            bc.apply(self.A3)
+            bc.apply(self.b3)
+
         #Solve the system
-        solve(self.F3 == 0, n, J = self.J, \
-              solver_parameters={"newton_solver": {"linear_solver": self.solver_normal, "preconditioner": self.precon_normal,\
-                                 "maximum_iterations": 200, "absolute_tolerance": 1e-6, "relative_tolerance": 1e-4}}, \
-              form_compiler_parameters={"optimize": True, "representation": "uflacs"})
+        solve(self.A3, n.vector(), self.b3, self.solver_normal, self.precon_normal)
 
 
     """Build and solve the system for Navier-Stokes part using Standard method"""

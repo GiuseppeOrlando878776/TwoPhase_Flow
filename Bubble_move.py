@@ -182,7 +182,7 @@ class BubbleMove(TwoPhaseFlows):
             self.Q2      = VectorFunctionSpace(self.mesh, "CG", 2)
             self.n_old   = Function(self.Q2)
             self.n_test  = TestFunction(self.Q2)
-            self.dn      = TrialFunction(self.Q2)
+            self.n_trial = TrialFunction(self.Q2)
         self.n = Function(self.Q2)
 
         #Define useful functions for reinitialization
@@ -282,6 +282,9 @@ class BubbleMove(TwoPhaseFlows):
             #Useful dictionaries for solver in order to avoid too many ifs
             self.switcher_NS_solve = {'ICT': self.solve_ICT_NS_systems}
             self.switcher_arguments_NS_solve = {'ICT': (self.bcs, self.u_curr, self.p_curr)}
+        if(self.normal_method == 'Evolution'):
+            self.bcs_normal = [DirichletBC(self.Q2.sub(1), Constant(0.0), NoSlip_Boundary(self.height)), \
+                               DirichletBC(self.Q2.sub(0), Constant(0.0), FreeSlip_Boundary(self.base))]
 
 
     """Auxiliary function to select proper Heavised approximation"""
@@ -322,8 +325,7 @@ class BubbleMove(TwoPhaseFlows):
 
             #Set variotional problem for normal advection (if needed)
             if(self.normal_method == 'Evolution'):
-                self.Normal_Advection_weak_form(self.n, self.n_test, self.n_old, self.DT, self.u_old, self.dn, \
-                                                self.mesh, self.parameter_normal)
+                self.Normal_Advection_weak_form(self.n_trial, self.n_test, self.n_old, self.DT, self.u_old, self.mesh, self.parameter_normal)
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
@@ -442,7 +444,7 @@ class BubbleMove(TwoPhaseFlows):
                     #Solve Normal equation: the velocity must be the same employed for the level-set advection
                     #and so we solve here this equation
                     begin(int(LogLevel.INFO) + 1,"Solving normal advection")
-                    self.solve_normal_advect(self.n)
+                    self.solve_normal_advect(self.n, self.bcs_normal)
                     self.n.assign(project(self.n/sqrt(inner(self.n, self.n)), self.Q2))
                     end()
                     if(self.n_iter % self.save_iters == 0):
@@ -479,4 +481,4 @@ class BubbleMove(TwoPhaseFlows):
             self.rho_interp.assign(project(self.rho(self.phi_old,self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t_end)
             self.vtkfile_phi << (self.phi_old, self.t_end)
-            self.vtkfile_n_evo << (self.n_old, self.t_end)
+            self.vtkfile_n_evo << (self.n, self.t_end)
