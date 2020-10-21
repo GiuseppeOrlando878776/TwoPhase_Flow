@@ -183,7 +183,12 @@ class BubbleMove(TwoPhaseFlows):
             self.n_old   = Function(self.Q2)
             self.n_test  = TestFunction(self.Q2)
             self.n_trial = TrialFunction(self.Q2)
+            self.Q2_bis  = VectorFunctionSpace(self.mesh, "CG", 1)
+            self.n_lb    = Function(self.Q2_bis)
         self.n = Function(self.Q2)
+        self.Q_bis    = FunctionSpace(self.mesh, "CG", 1)
+        self.div_n    = Function(self.Q_bis)
+        self.mod_grad = Function(self.Q_bis)
 
         #Define useful functions for reinitialization
         self.phi0 = Function(self.Q)
@@ -225,7 +230,7 @@ class BubbleMove(TwoPhaseFlows):
             #Dictionary for reinitialization weak form
             self.switcher_reinit_varf = {'Conservative': self.CLSM_weak_form}
             self.switcher_arguments_reinit_varf = {'Conservative': \
-                                                   (self.phi_intermediate, self.l, self.phi0, self.n, self.dt_reinit, self.eps)}
+                                                   (self.phi_intermediate, self.l, self.phi0, self.n_lb, self.dt_reinit, self.eps)}
 
             #Dictionary for reinitialization solution
             self.switcher_reinit_solve = {'Conservative': self.C_Levelset_reinit}
@@ -325,7 +330,8 @@ class BubbleMove(TwoPhaseFlows):
 
             #Set variotional problem for normal advection (if needed)
             if(self.normal_method == 'Evolution'):
-                self.Normal_Advection_weak_form(self.n_trial, self.n_test, self.n_old, self.DT, self.u_old, self.mesh, self.parameter_normal)
+                self.Normal_Advection_weak_form(self.n_trial, self.n_test, self.n_old, self.DT, self.u_old, \
+                                                self.mesh, self.parameter_normal)
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
@@ -402,9 +408,12 @@ class BubbleMove(TwoPhaseFlows):
         #File for plotting
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
-        if(self.normal_method == 'Evolution'):
-            self.vtkfile_n_evo = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/n_evo.pvd')
+        self.vtkfile_n_reinit = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/n_reinit.pvd')
+        self.vtkfile_n_evo = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/n_evo.pvd')
         self.vtkfile_phi = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/phi.pvd')
+        self.vtkfile_div_n_reinit =  File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/div_n_reinit.pvd')
+        self.vtkfile_div_n_evo =  File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/div_n_evo.pvd')
+        self.vtkfile_mod_grad = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/mod_grad.pvd')
 
         #File for benchamrk comparisons
         self.timeseries = open(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/benchmark_series.dat','wb')
@@ -427,17 +436,13 @@ class BubbleMove(TwoPhaseFlows):
                 try:
                     begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
                     if(self.reinit_method == 'Conservative'):
-                        if(self.normal_method == 'Laplace_Beltrami'):
-                            self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
-                        elif(self.normal_method == 'Evolution'):
-                            begin(int(LogLevel.INFO) + 1,"Solving normal advection")
-                            self.solve_normal_advect(self.n, self.bcs_normal) #Compute normal vector
-                            self.n.assign(project(self.n/sqrt(inner(self.n, self.n)), self.Q2)) #Impose unit norm
-                            end()
-                            #Prepare to next step assign previous-step solution
-                            self.n_old.assign(self.n)
-                            if(self.n_iter % self.save_iters == 0):
-                                self.vtkfile_n_evo << (self.n, self.t)
+                        self.n_lb.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute current normal vector
+                        if(self.n_iter % self.save_iters == 0):
+                            self.vtkfile_n_reinit << (self.n, self.t)
+                            self.div_n.assign(project(div(self.n_lb), self.Q_bis))
+                            self.vtkfile_div_n_reinit << (self.div_n, self.t)
+                            self.mod_grad.assign(project(sqrt(inner(grad(self.phi_curr), grad(self.phi_curr))), self.Q_bis))
+                            self.vtkfile_mod_grad << (self.mod_grad, self.t)
                     self.switcher_reinit_solve[self.reinit_method](*self.switcher_arguments_reinit_solve[self.reinit_method])
                     end()
                 except Exception as e:
@@ -448,8 +453,7 @@ class BubbleMove(TwoPhaseFlows):
             if(self.sigma > DOLFIN_EPS):
                 if(self.normal_method == 'Laplace_Beltrami'):
                     self.n.assign(project(grad(self.phi_curr)/mgrad(self.phi_curr), self.Q2)) #Compute normal vector
-                elif(self.normal_method == 'Evolution'  and (self.reinit_method != 'Conservative' or reinit_iters == 0 or  \
-                                                             self.n_iter % reinit_iters != 0)):
+                elif(self.normal_method == 'Evolution'):
                     #Solve Normal equation: the velocity must be the same employed for the level-set advection
                     #and so we solve here this equation
                     begin(int(LogLevel.INFO) + 1,"Solving normal advection")
@@ -458,6 +462,8 @@ class BubbleMove(TwoPhaseFlows):
                     end()
                     if(self.n_iter % self.save_iters == 0):
                         self.vtkfile_n_evo << (self.n, self.t)
+                        self.div_n.assign(project(div(self.n), self.Q_bis))
+                        self.vtkfile_div_n_evo << (self.div_n, self.t)
                     #Prepare to next step assign previous-step solution
                     self.n_old.assign(self.n)
 
@@ -491,3 +497,5 @@ class BubbleMove(TwoPhaseFlows):
             self.vtkfile_rho << (self.rho_interp, self.t_end)
             self.vtkfile_phi << (self.phi_old, self.t_end)
             self.vtkfile_n_evo << (self.n, self.t_end)
+            self.div_n.assign(project(div(self.n), self.Q_bis))
+            self.vtkfile_div_n_evo << (self.div_n, self.t_end)

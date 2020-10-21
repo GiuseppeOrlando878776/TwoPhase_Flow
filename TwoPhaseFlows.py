@@ -311,7 +311,7 @@ class TwoPhaseFlows():
         #Save variational formulation
         F3 = inner((n_trial - n_old)/dt, n_test)*dx \
            + inner(n_old, u_old)*inner(dot(n_old, nabla_grad(n_trial)), n_test)*dx \
-           - inner(n_old, u_old)*div(n_test)*dx \
+           + inner(grad(inner(n_old, u_old)), n_test)*dx \
            - inner(dot(grad(inner(n_old, u_old)), outer(n_trial, n_old)), n_test)*dx
         #Add the SUPG stabilization
         h = CellDiameter(mesh)
@@ -326,7 +326,6 @@ class TwoPhaseFlows():
 
         self.A3 = PETScMatrix()
         self.b3 = PETScVector()
-
 
     """Build and solve the system for Level set transport"""
     def solve_Levelset_system(self, phi_curr):
@@ -406,7 +405,7 @@ class TwoPhaseFlows():
         #Solve the system
         solve(self.A3, n.vector(), self.b3, self.solver_normal, self.precon_normal)
 
-
+        
     """Build and solve the system for Navier-Stokes part using Standard method"""
     def solve_Standard_NS_system(self, bcs, w_curr):
         #Assemble matrices and right-hand sides
