@@ -1,6 +1,5 @@
 from sys import argv
 from Bubble_move import *
-from Rayleigh_Taylor import *
 
 def main():
     if(len(argv) == 2):
