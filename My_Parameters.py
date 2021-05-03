@@ -14,13 +14,15 @@ class My_Parameters:
         #Since these parameters are more related to the numeric part
         #rather than physics we choose to set a default value in order to
         #avoid problems in case they will not present in the file
-        self.Param.add("Polynomial_degree", 1)
+        self.Param.add("Polynomial_degree_NS", 1)
+        self.Param.add("Polynomial_degree_VF", 2)
         self.Param.add("Number_vertices_x", 80)
         self.Param.add("Number_vertices_y", 160)
         self.Param.add("Log_Level", 21) #more than INFO level by default
         self.Param.add("Reinit_Type", 'Non_Conservative_Hyperbolic')
         self.Param.add("Stabilization_Type", 'SUPG')
         self.Param.add("NS_Procedure", 'ICT')
+        self.Param.add("VF_Procedure", 'Continuous')
         self.Param.add("Interface_Thickness", 0.025)
         self.Param.add("Stabilization_Parameter", 0.01)
         self.Param.add("Reference_Dimensionalization", 'Dimensional')
