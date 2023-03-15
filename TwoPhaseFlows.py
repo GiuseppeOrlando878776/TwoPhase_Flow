@@ -34,7 +34,7 @@ class TwoPhaseFlows():
 
 
     """Weak formulation for Navier-Stokes"""
-    def NS_weak_form(self, u, p, v, q, u_old, dt, rho, mu, alpha_curr, alpha_old, n_gamma = None, CDelta = None, **kwargs):
+    def NS_weak_form(self, u, p, v, q, u_old, dt, rho, mu, alpha_curr, alpha_old, n_gamma = None, area_curr = None, **kwargs):
         #Check correctness of types
         if(not isinstance(u_old, Function)):
             raise ValueError("u_old must be an instance of Function")
@@ -58,11 +58,11 @@ class TwoPhaseFlows():
                + div(u)*q*dx \
                + g*inner(rho(alpha_curr, eps)*self.e2, v)*dx
             if(sigma > DOLFIN_EPS):
-                if(not callable(CDelta)):
-                    raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
+                if(not isinstance(area_curr, Function)):
+                    raise ValueError("The area approximation must be an instance of Function")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += Constant(sigma)*mgrad(alpha_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(alpha_curr, eps)*dx
+                F2 += Constant(sigma)*area_curr*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*dx
         elif(len(kwargs) == 3):
             assert 'Re' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Re' not found (check function call)"
             assert 'Fr' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Fr' not found (check function call)"
@@ -77,11 +77,11 @@ class TwoPhaseFlows():
                + div(u)*q*dx \
                + Constant(1.0/(Fr*Fr))*inner(rho(alpha_curr, eps)*self.e2, v)*dx
             if(We > DOLFIN_EPS):
-                if(not callable(CDelta)):
-                    raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
+                if(not isinstance(area_curr, Function)):
+                    raise ValueError("The area approximation must be an instance of Function")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += Constant(1.0/We)*mgrad(alpha_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(alpha_curr, eps)*dx
+                F2 += Constant(1.0/We)*area_curr*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*dx
         else:
             raise ValueError("Wrong number of arguments in Standard NS weak form setting (check function call)")
 
@@ -93,15 +93,39 @@ class TwoPhaseFlows():
         self.b2 = PETScVector()
 
 
+    """SUPG method for NS"""
+    def SUPG_NS_ICT(self, u, v, u_old, p_old, dt, rho, mu, alpha_curr, alpha_old, eps, n_gamma, area_curr, g, sigma, \
+                    mesh, scaling):
+        #Extract cell diameter
+        h = CellDiameter(mesh)
+
+        #Compute the stabilization term
+        r = scaling*h/ufl.Max(2.0*sqrt(inner(u_old, u_old)),1.0e-3/h)* \
+            inner((Constant(1.0)/dt)*(rho(alpha_curr, eps)*u - rho(alpha_old, eps)*u_old) + \
+                  rho(alpha_curr, eps)*dot(u_old, nabla_grad(u)) - \
+                  div(Constant(2.0)*mu(alpha_curr, eps)*D(u)) + \
+                  grad(p_old) + \
+                  g*rho(alpha_curr, eps)*self.e2 + \
+                  Constant(sigma)*div(area_curr*(Identity(self.n_dim) - outer(n_gamma, n_gamma))), \
+                  rho(alpha_curr, eps)*dot(u_old, nabla_grad(v)))*dx
+
+        return r
+
+
     """Weak formulation for tentative velocity"""
-    def ICT_weak_form_1(self, u, v, u_old, p_old, dt, rho, mu, alpha_curr, alpha_old, eps, n_gamma = None, CDelta = None, **kwargs):
+    def ICT_weak_form_1(self, u, v, u_old, u_k, p_old, dt, rho, mu, alpha_k, alpha_old, eps, mesh, scaling, \
+                        n_gamma = None, area_k = None, **kwargs):
         #Check the correctness of type
         if(not isinstance(u_old, Function)):
             raise ValueError("u_old must be an instance of Function")
+        if(not isinstance(u_k, Function)):
+            raise ValueError("u_k must be an instance of Function")
         if(not isinstance(p_old, Function)):
             raise ValueError("p_old must be an instance of Function")
-        if(not isinstance(alpha_curr, Function)):
-            raise ValueError("alpha_curr must be an instance of Function")
+        if(not isinstance(alpha_k, Function)):
+            raise ValueError("alpha_k must be an instance of Function")
+        if(not isinstance(alpha_old, Function)):
+            raise ValueError("alpha_old must be an instance of Function")
         if(not callable(rho)):
             raise ValueError("The function to compute the density must be a callable object")
         if(not callable(mu)):
@@ -113,17 +137,19 @@ class TwoPhaseFlows():
             assert 'sigma' in kwargs, "Error in the parameters for dimensional version of NS: 'sigma' not found (check function call)"
             g = kwargs.get('g')
             sigma = kwargs.get('sigma')
-            F2 = (Constant(1.0)/dt)*inner(rho(alpha_curr, eps)*u - rho(alpha_old, eps)*u_old, v)*dx \
-               + inner(rho(alpha_curr, eps)*dot(u_old, nabla_grad(u)), v)*dx \
-               + Constant(2.0)*inner(mu(alpha_curr, eps)*D(u), D(v))*dx \
+            F2 = (Constant(1.0)/dt)*inner(rho(alpha_k, eps)*u - rho(alpha_old, eps)*u_old, v)*dx \
+               + inner(rho(alpha_k, eps)*dot(u_k, nabla_grad(u)), v)*dx \
+               + Constant(2.0)*inner(mu(alpha_k, eps)*D(u), D(v))*dx \
                - p_old*div(v)*dx \
-               + g*inner(rho(alpha_curr, eps)*self.e2, v)*dx
+               + g*inner(rho(alpha_k, eps)*self.e2, v)*dx
             if(sigma > DOLFIN_EPS):
-                if(not callable(CDelta)):
-                    raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
+                if(not isinstance(area_k, Function)):
+                    raise ValueError("The area approximation must be an instance of Function")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += Constant(sigma)*mgrad(alpha_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(alpha_curr, eps)*dx
+                F2 += Constant(sigma)*area_k*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*dx
+                #F2 += self.SUPG_NS_ICT(u, v, u_old, p_old, dt, rho, mu, alpha_curr, alpha_old, eps, n_gamma, area_curr, \
+                #                       g, sigma, mesh, scaling)
         elif(len(kwargs) == 3):
             assert 'Re' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Re' not found (check function call)"
             assert 'Fr' in kwargs, "Error in the parameters for non-dimensional version of NS: 'Fr' not found (check function call)"
@@ -137,11 +163,11 @@ class TwoPhaseFlows():
                - p_old*div(v)*dx \
                + Constant(1.0/(Fr*Fr))*inner(rho(alpha_curr, eps)*self.e2, v)*dx
             if(We > DOLFIN_EPS):
-                if(not callable(CDelta)):
-                    raise ValueError("The function to compute the approximation of Dirac's delta must be a callable object")
+                if(not isinstance(area_curr, Function)):
+                    raise ValueError("The area approximation must be an instance of Function")
                 if(not isinstance(n_gamma, Function)):
                     raise ValueError("n(the unit normal to the interface) must be an instance of Function")
-                F2 += Constant(1.0/We)*mgrad(alpha_curr)*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*CDelta(alpha_curr, eps)*dx
+                F2 += Constant(1.0/We)*area_curr*inner((Identity(self.n_dim) - outer(n_gamma, n_gamma)), D(v))*dx
         else:
             raise ValueError("Wrong number of arguments in ICT-Step 1 weak form setting (check function call)")
 
@@ -212,32 +238,43 @@ class TwoPhaseFlows():
 
 
     """SUPG method"""
-    def SUPG(self, alpha, l, alpha_old, u_old, dt, mesh, scaling):
+    def SUPG(self, alpha, l, alpha_old, u_k, dt, mesh, scaling):
         #Extract cell diameter
         h = CellDiameter(mesh)
 
         #Compute the stabilization term
-        r = ((alpha - alpha_old)/dt + inner(u_old, grad(alpha)))* \
-            scaling*h/ufl.Max(2.0*sqrt(inner(u_old, u_old)),1.0e-3/h)*inner(u_old, grad(l))*dx
+        r = ((alpha - alpha_old)/dt + inner(u_k, grad(alpha)))* \
+            scaling*h/ufl.Max(2.0*sqrt(inner(u_k, u_k)),1.0e-3/h)*inner(u_k, grad(l))*dx
+        return r
+
+
+    """SUPG method for area"""
+    def SUPG_area(self, area, l, area_old, u_k, dt, mesh, n, scaling):
+        #Extract cell diameter
+        h = CellDiameter(mesh)
+
+        #Compute the stabilization term
+        r = ((area - area_old)/dt + inner(u_k, grad(area)) + area*inner(dot(n, nabla_grad(u_k)), n))* \
+            scaling*h/ufl.Max(2.0*sqrt(inner(u_k, u_k)),1.0e-3/h)*inner(u_k, grad(l))*dx
         return r
 
 
     """Volume fraction advection weak formulation (continuous formulation)"""
-    def VF_weak_form(self, alpha, l, alpha_old, u_old, dt, mesh, method, param = None):
+    def VF_weak_form(self, alpha, l, alpha_old, u_k, dt, mesh, method, param = None):
         #Check availability of the method before proceding
         assert method in self.stab_dict, "Stabilization method(" + method + ") not available"
 
         #Check the correctness of type
         if(not isinstance(alpha_old, Function)):
             raise ValueError("alpha_old must be an instance of Function")
-        if(not isinstance(u_old, Function)):
-            raise ValueError("u_old must be an instance of Function")
+        if(not isinstance(u_k, Function)):
+            raise ValueError("u_k must be an instance of Function")
 
         #Save the dimension of the problem
         self.n_dim = mesh.geometry().dim()
 
         #Declare weak formulation
-        F1 = ((alpha - alpha_old)/dt + inner(u_old, grad(alpha)))*l*dx
+        F1 = ((alpha - alpha_old)/dt + inner(u_k, grad(alpha)))*l*dx
 
         #Add stabilization term (if specified)
         if(method == 'SUPG'):
@@ -246,7 +283,7 @@ class TwoPhaseFlows():
             "Stabilization parameter not available in order to use SUPG stabilization (check the call of the function)"
 
             #Add the stabilization term
-            F1 += self.SUPG(alpha, l, alpha_old, u_old, dt, mesh, param)
+            F1 += self.SUPG(alpha, l, alpha_old, u_k, dt, mesh, param)
         elif(method == 'IP'):
             #Check whether stabilization parameter is really available
             assert param is not None, \
@@ -314,18 +351,20 @@ class TwoPhaseFlows():
 
 
     """Area advection weak formulation"""
-    def area_weak_form(self, area, l, area_old, u_old, dt, mesh, method, param = None):
+    def area_weak_form(self, area, l, area_old, u_k, dt, mesh, n, method, param = None):
         #Check availability of the method before proceding
         assert method in self.stab_dict, "Stabilization method(" + method + ") not available"
 
         #Check the correctness of type
         if(not isinstance(area_old, Function)):
             raise ValueError("area_old must be an instance of Function")
-        if(not isinstance(u_old, Function)):
-            raise ValueError("u_old must be an instance of Function")
+        if(not isinstance(u_k, Function)):
+            raise ValueError("u_k must be an instance of Function")
 
         #Declare weak formulation
-        F1 = ((area - area_old)/dt + inner(u_old, grad(area)))*l*dx
+        F1 = ((area - area_old)/dt + inner(u_k, grad(area)))*l*dx \
+           + area*inner(dot(n, nabla_grad(u_k)), n)*l*dx
+
 
         #Add stabilization term (if specified)
         if(method == 'SUPG'):
@@ -334,7 +373,7 @@ class TwoPhaseFlows():
             "Stabilization parameter not available in order to use SUPG stabilization (check the call of the function)"
 
             #Add the stabilization term
-            F1 += self.SUPG(area, l, area_old, u_old, dt, mesh, param)
+            F1 += self.SUPG_area(area, l, area_old, u_k, dt, mesh, n, param)
         elif(method == 'IP'):
             #Check whether stabilization parameter is really available
             assert param is not None, \

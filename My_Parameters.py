@@ -25,6 +25,8 @@ class My_Parameters:
         self.Param.add("VF_Procedure", 'Continuous')
         self.Param.add("Interface_Thickness", 0.025)
         self.Param.add("Stabilization_Parameter", 0.01)
+        self.Param.add("Stabilization_Parameter_Area", 0.01)
+        self.Param.add("Stabilization_Parameter_NS", 0.01)
         self.Param.add("Reference_Dimensionalization", 'Dimensional')
         self.Param.add("Settings_Type", 'Physical')
         self.Param.add("Maximum_subiters_recon", 10)
@@ -34,6 +36,8 @@ class My_Parameters:
         self.Param.add("Saving_Directory", 'Sim')
         self.Param.add("Interface_Perturbation_RT", 'Cos')
         self.Param.add("Problem", 'Bubble')
+        self.Param.add("Reynolds_number", 35)
+        self.Param.add("Bond_number", 125)
 
         try:
             self.file = open(param_name, "r")
@@ -53,6 +57,8 @@ class My_Parameters:
             f.write("x_center = 0.5\n")
             f.write("y_center = 0.5\n")
             f.write("Radius = 0.25\n")
+            f.write("Reynolds_number = 35.0\n")
+            f.write("Bond_number = 125.0\n")
             f.close()
             self.file = open(param_name, "r")
 

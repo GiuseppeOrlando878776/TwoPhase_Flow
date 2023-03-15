@@ -30,8 +30,7 @@ class BubbleMove(TwoPhaseFlows):
         self.rank = MPI.rank(self.comm)
 
         #Check coherence of dimensional choice
-        if(self.Param["Reference_Dimensionalization"] != 'Dimensional'):
-            raise ValueError("This instance of the problem 'BubbleMove' works in a dimensional framework")
+        self.dim_choice = self.Param["Reference_Dimensionalization"]
 
         try:
             self.rho1  = float(self.Param["Lighter_density"])
@@ -45,6 +44,12 @@ class BubbleMove(TwoPhaseFlows):
         except RuntimeError as e:
             print(str(e) +  "\nPlease check configuration file")
             exit(1)
+
+        if(self.dim_choice == 'Non_Dimensional'):
+            self.rho1_rho2 = self.rho1/self.rho2
+            self.mu1_mu2 = self.mu1/self.mu2
+            self.Re = float(self.Param["Reynolds_number"])
+            self.Bo = float(self.Param["Bond_number"])
 
         #Check correctness of data read
         if(self.rho1 < DOLFIN_EPS or self.rho2 < DOLFIN_EPS or self.mu1 < DOLFIN_EPS or self.mu2 < DOLFIN_EPS \
@@ -104,6 +109,10 @@ class BubbleMove(TwoPhaseFlows):
             if(MPI.size(self.comm) > 1):
                 parameters["ghost_mode"] = "shared_facet"
 
+        self.scaling_area = self.Param["Stabilization_Parameter_Area"]
+
+        self.scaling_NS = self.Param["Stabilization_Parameter_NS"]
+
         #Convert useful constants to constant FENICS functions
         self.DT = Constant(self.dt)
         self.g  = Constant(self.g)
@@ -133,8 +142,8 @@ class BubbleMove(TwoPhaseFlows):
         self.mesh = RectangleMesh(Point(0.0, 0.0), Point(self.base, self.height), \
                                   self.Param["Number_vertices_x"], self.Param["Number_vertices_y"])
         hmin = MPI.min(self.comm, self.mesh.hmin())
-        self.dt_reinit = Constant(0.5*hmin**(1.1))
-        self.eps = Constant(0.5*hmin**(0.9))
+        self.dt_reinit = Constant(0.5*hmin**(1.1)) #Pseudo time-step for reinitialization
+        self.eps = Constant(0.5*hmin**(0.9)) #Interface thickness
         #self.eps = self.Param["Interface_Thickness"]
         #if(self.eps < DOLFIN_EPS):
         #    raise  ValueError("Non-Positive value for the interface thickness")
@@ -146,12 +155,15 @@ class BubbleMove(TwoPhaseFlows):
         Pelem = FiniteElement("Lagrange", self.mesh.ufl_cell(), self.deg_NS)
         self.V  = FunctionSpace(self.mesh, Velem)
         self.P  = FunctionSpace(self.mesh, Pelem)
+
         if(self.NS_sol_method == 'Standard'):
             self.W  = FunctionSpace(self.mesh, Velem*Pelem)
+
         if(self.VF_sol_method == 'Continuous'):
             self.Q  = FunctionSpace(self.mesh, "CG", self.deg_VF)
         elif(self.VF_sol_method == 'DG'):
             self.Q  = FunctionSpace(self.mesh, "DG", self.deg_VF)
+
         self.Q2 = VectorFunctionSpace(self.mesh, "CG", 1)
 
         #Define trial and test functions
@@ -163,20 +175,28 @@ class BubbleMove(TwoPhaseFlows):
             self.v = TestFunction(self.V)
             self.p = TrialFunction(self.P)
             self.q = TestFunction(self.P)
+
         self.alpha = TrialFunction(self.Q)
+
         self.area  = TrialFunction(self.Q)
-        self.l   = TestFunction(self.Q)
+
+        self.l     = TestFunction(self.Q)
 
         #Define functions to store solution
         self.u_curr   = Function(self.V)
+        self.u_k      = Function(self.V)
         self.u_old    = Function(self.V)
         self.p_curr   = Function(self.P)
         self.p_old    = Function(self.P)
         if(self.NS_sol_method == 'Standard'):
             self.w_curr = Function(self.W)
+
         self.alpha_curr = Function(self.Q)
+        self.alpha_k    = Function(self.Q)
         self.alpha_old  = Function(self.Q)
+
         self.area_curr  = Function(self.Q)
+        self.area_k     = Function(self.Q)
         self.area_old   = Function(self.Q)
 
         #Define function to store the normal
@@ -208,9 +228,12 @@ class BubbleMove(TwoPhaseFlows):
         #Assign initial condition
         self.u_old.assign(interpolate(Constant((0.0,0.0)), self.V))
         self.p_old.assign(interpolate(Constant(0.0), self.P))
+
         f = Expression("1.0/(1.0 + exp((r - sqrt((x[0]-A)*(x[0]-A) + (x[1]-B)*(x[1]-B)))/eps))",
                         A = center[0], B = center[1], r = radius, eps = self.eps, degree = 2)
+
         self.alpha_old.assign(interpolate(f, self.Q))
+
         self.area_old.assign(project(mgrad(self.alpha_old),self.Q))
 
 
@@ -244,12 +267,17 @@ class BubbleMove(TwoPhaseFlows):
 
     """Auxiliary function to compute density"""
     def rho(self, x, eps):
-        return self.rho2*self.Appr_Heaviside(x, eps) + self.rho1*(1.0 - self.Appr_Heaviside(x, eps))
-
+        if(self.dim_choice == 'Dimensional'):
+            return self.rho2*self.Appr_Heaviside(x,eps) + self.rho1*(1.0 - self.Appr_Heaviside(x,eps))
+        elif(self.dim_choice == 'Non_Dimensional'):
+            return self.Appr_Heaviside(x,eps) + self.rho1_rho2*(1.0 - self.Appr_Heaviside(x,eps))
 
     """Auxiliary function to compute viscosity"""
     def mu(self, x, eps):
-        return self.mu2*self.Appr_Heaviside(x, eps) + self.mu1*(1.0 - self.Appr_Heaviside(x, eps))
+         if(self.dim_choice == 'Dimensional'):
+            return self.mu2*self.Appr_Heaviside(x,eps) + self.mu1*(1.0 - self.Appr_Heaviside(x,eps))
+         elif(self.dim_choice == 'Non_Dimensional'):
+            return self.Appr_Heaviside(x,eps) + self.mu1_mu2*(1.0 - self.Appr_Heaviside(x,eps))
 
 
     """Set weak formulations"""
@@ -257,7 +285,7 @@ class BubbleMove(TwoPhaseFlows):
         try:
             #Set variational problem for step 1 (Volume fraction)
             if(self.VF_sol_method == 'Continuous'):
-                self.VF_weak_form(self.alpha, self.l, self.alpha_old, self.u_old, self.DT, self.mesh, \
+                self.VF_weak_form(self.alpha, self.l, self.alpha_old, self.u_k, self.DT, self.mesh, \
                                   self.stab_method, self.switcher_parameter[self.stab_method])
             elif(self.VF_sol_method == 'DG'):
                 self.VF_weak_form_DG(self.alpha, self.l, self.alpha_old, self.u_old, self.DT, self.mesh, self.gamma)
@@ -265,16 +293,28 @@ class BubbleMove(TwoPhaseFlows):
             self.CLSM_weak_form(self.alpha_intermediate, self.l, self.alpha0, self.n, self.dt_reinit, self.eps)
 
             #Set variational problem for the area
-            self.area_weak_form(self.area, self.l, self.area_old, self.u_old, self.DT, self.mesh, \
-                                self.stab_method, self.switcher_parameter[self.stab_method])
+            self.area_weak_form(self.area, self.l, self.area_old, self.u_k, self.DT, self.mesh, self.n, \
+                                self.stab_method, self.scaling_area)
 
             #Set variational problem for step 2 (Navier-Stokes)
             if(self.NS_sol_method == 'Standard'):
-                self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
-                                  self.alpha_curr, self.alpha_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                if(self.dim_choice == 'Dimensional'):
+                    self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                                      self.alpha_curr, self.alpha_old, self.eps, self.n, self.area_curr, \
+                                      g = self.g, sigma = self.sigma)
+                elif(self.dim_choice == 'Non_Dimensional'):
+                    self.NS_weak_form(self.u, self.p, self.v, self.q, self.u_old, self.DT, self.rho, self.mu, \
+                                      self.alpha_curr, self.alpha_old, self.eps, self.n, self.area_curr, \
+                                      Re = self.Re, Fr = 1.0, We = self.Bo)
             elif(self.NS_sol_method == 'ICT'):
-                self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
-                                     self.alpha_curr, self.alpha_old, self.eps, self.n, self.Appr_Delta, g = self.g, sigma = self.sigma)
+                if(self.dim_choice == 'Dimensional'):
+                    self.ICT_weak_form_1(self.u, self.v, self.u_old, self.u_k, self.p_old, self.DT, self.rho, self.mu, \
+                                         self.alpha_k, self.alpha_old, self.eps, self.mesh, self.scaling_NS, \
+                                         self.n, self.area_k, g = self.g, sigma = self.sigma)
+                elif(self.dim_choice == 'Non_Dimensional'):
+                    self.ICT_weak_form_1(self.u, self.v, self.u_old, self.p_old, self.DT, self.rho, self.mu, \
+                                         self.alpha_curr, self.alpha_old, self.eps, self.mesh, self.scaling_NS, \
+                                         self.n, self.area_curr, Re = self.Re, Fr = 1.0, We = self.Bo)
                 self.ICT_weak_form_2(self.p, self.q, self.DT, self.p_old, self.u_curr, self.rho, self.alpha_curr, self.eps)
                 self.ICT_weak_form_3(self.u, self.v, self.DT, self.u_curr, self.p_curr, self.p_old, self.rho, self.alpha_curr, self.eps)
         except ValueError as e:
@@ -292,6 +332,7 @@ class BubbleMove(TwoPhaseFlows):
             self.rho_interp.assign(project(self.rho(self.alpha_old, self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t)
             self.vtkfile_alpha << (self.alpha_old, self.t)
+            self.vtkfile_area << (self.area_old, self.t)
 
         #Compute benchamrk quantities
         Vol = assemble(conditional(lt(self.alpha_old, 0.5), 1.0, 0.0)*dx)
@@ -335,6 +376,7 @@ class BubbleMove(TwoPhaseFlows):
         self.vtkfile_u = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/u.pvd')
         self.vtkfile_rho = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/rho.pvd')
         self.vtkfile_alpha = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/alpha.pvd')
+        self.vtkfile_area = File(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/area.pvd')
 
         #File for benchamrk comparisons
         self.timeseries = open(os.getcwd() + '/' + self.Param["Saving_Directory"] + '/benchmark_series.dat','wb')
@@ -347,38 +389,61 @@ class BubbleMove(TwoPhaseFlows):
             begin(int(LogLevel.INFO) + 1,"t = " + str(self.t) + " s")
             self.n_iter += 1
 
-            #Solve volume of fraction and update unit normal (if needed)
-            begin(int(LogLevel.INFO) + 1,"Solving volume of fraction")
-            self.solve_VolumeFraction_system(self.alpha_curr)
-            end()
+            self.u_k.assign(self.u_old)
+            self.alpha_k.assign(self.alpha_old)
+            self.area_k.assign(self.area_old)
 
-            #Solve volume of fraction reinitialization
-            if(self.n_iter % reinit_iters == 0):
-                try:
-                    begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
-                    self.n.assign(project(grad(self.alpha_curr)/mgrad(self.alpha_curr), self.Q2)) #Compute current normal vector
-                    self.C_VolumeFraction_reinit(self.alpha_curr, self.alpha_intermediate, self.alpha0, self.dt_reinit, \
-                                                 self.max_subiters, self.tol_recon)
-                    end()
-                except Exception as e:
-                    if(self.rank == 0):
-                        print(str(e))
-                        print("Aborting simulation...")
-                    exit(1)
-            if(self.sigma > DOLFIN_EPS):
-                self.n.assign(project(grad(self.alpha_curr)/mgrad(self.alpha_curr), self.Q2)) #Compute normal vector
+            for k in range(20):
 
-            #Solve area eqution
-            begin(int(LogLevel.INFO) + 1,"Solving evolution area")
-            self.solve_Area_system(self.area_curr)
-            end()
+                #Solve area equation
+                begin(int(LogLevel.INFO) + 1,"Solving evolution area")
+                self.n.assign(project(grad(self.area_old)/mgrad(self.area_old), self.Q2))
+                self.solve_Area_system(self.area_curr)
+                end()
 
-            #Solve Navier-Stokes
-            begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
-            self.switcher_NS_solve[self.NS_sol_method](*self.switcher_arguments_NS_solve[self.NS_sol_method])
-            if(self.NS_sol_method == 'Standard'):
-                (self.u_curr, self.p_curr) = self.w_curr.split(True)
-            end()
+                #Solve volume of fraction and update unit normal (if needed)
+                begin(int(LogLevel.INFO) + 1,"Solving volume of fraction")
+                self.solve_VolumeFraction_system(self.alpha_curr)
+                end()
+
+                #Solve volume of fraction reinitialization
+                if(reinit_iters > 0 and self.n_iter % reinit_iters == 0):
+                    try:
+                        begin(int(LogLevel.INFO) + 1,"Solving reinitialization")
+                        self.n.assign(project(grad(self.alpha_curr)/mgrad(self.alpha_curr), self.Q2)) #Compute current normal vector
+                        self.C_VolumeFraction_reinit(self.alpha_curr, self.alpha_intermediate, self.alpha0, self.dt_reinit, \
+                                                     self.max_subiters, self.tol_recon)
+                        end()
+                    except Exception as e:
+                        if(self.rank == 0):
+                            print(str(e))
+                            print("Aborting simulation...")
+                        exit(1)
+
+                self.n.assign(project(grad(self.area_curr)/mgrad(self.area_curr), self.Q2)) #Compute normal vector
+
+                #Solve Navier-Stokes
+                begin(int(LogLevel.INFO) + 1,"Solving Navier-Stokes")
+                self.switcher_NS_solve[self.NS_sol_method](*self.switcher_arguments_NS_solve[self.NS_sol_method])
+                if(self.NS_sol_method == 'Standard'):
+                    (self.u_curr, self.p_curr) = self.w_curr.split(True)
+                end()
+
+                #Check convergence
+                error_alpha = ((self.alpha_curr - self.alpha_k)**2)*dx
+                E_alpha = sqrt(assemble(error_alpha))
+                error_area = ((self.area_curr - self.area_k)**2)*dx
+                E_area = sqrt(assemble(error_area))
+                error_u = ((self.u_curr - self.u_k)**2)*dx
+                E_u = sqrt(assemble(error_u))
+                if(max(max(E_alpha, E_area), E_u) < 1e-8):
+                    break
+
+                #Prepare for next sub-step
+                self.u_k.assign(self.u_curr)
+                self.p_old.assign(self.p_curr)
+                self.alpha_k.assign(self.alpha_curr)
+                self.area_k.assign(self.area_curr)
 
             #Prepare to next step assign previous-step solution
             self.u_old.assign(self.u_curr)
@@ -402,3 +467,5 @@ class BubbleMove(TwoPhaseFlows):
             self.vtkfile_u << (self.u_old, self.t_end)
             self.rho_interp.assign(project(self.rho(self.alpha_old, self.eps), self.Q))
             self.vtkfile_rho << (self.rho_interp, self.t_end)
+            self.vtkfile_alpha << (self.alpha_old, self.t)
+            self.vtkfile_area << (self.area_old, self.t)
